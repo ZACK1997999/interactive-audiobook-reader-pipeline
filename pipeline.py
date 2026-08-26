@@ -19,6 +19,7 @@ sys.path.append(PIPELINE_DIR)
 from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
 from validate_outputs import validate
+from chapter_resolver import discover_chapters
 from audio_resolver import resolve_chapter_audio
 
 
@@ -51,27 +52,22 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
     master_html_name = f"{book_title.replace(' ', '_')}_Interactive_Reader.html"
     master_html_path = os.path.join(book_dir, master_html_name)
     
-    # Discover all canonical files
-    canon_files = sorted(glob.glob(os.path.join(book_dir, "*canonical_sentences.json")))
-    if not canon_files:
+    # Discover all chapter artifacts through the shared resolver.
+    chapter_artifacts = discover_chapters(book_dir)
+    if not chapter_artifacts:
         print(f"No canonical sentence files found in {book_dir}")
         return 0, master_html_path
         
     aligned_configs = []
     
-    for c_path in canon_files:
-        base_name = os.path.basename(c_path)
-        prefix = base_name.replace("_canonical_sentences.json", "")
-        
-        # Determine chapter number
-        ch_num = 0
-        digits = [int(s) for s in re.findall(r'\d+', prefix)]
-        if digits:
-            ch_num = digits[0]
+    for artifact in chapter_artifacts:
+        c_path = str(artifact.canonical_path)
+        prefix = artifact.prefix
+        ch_num = artifact.chapter_number
             
-        analysis_path = os.path.join(book_dir, f"{prefix}_full_analysis.json")
+        analysis_path = str(artifact.analysis_path)
         aligned_path = os.path.join(book_dir, f"{prefix}_aligned_sentences.json")
-        acoustic_path = os.path.join(audio_dir, f"{prefix}_acoustic_words.json")
+        acoustic_path = str(artifact.acoustic_path)
         
         # Audio file matching
         audio_file = _find_chapter_audio(audio_dir, ch_num)
@@ -110,7 +106,7 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
                 "aligned_json": aligned_path
             })
             
-    print(f"\nDiscovered {len(aligned_configs)} / {len(canon_files)} ready aligned chapters for {book_title}")
+    print(f"\nDiscovered {len(aligned_configs)} / {len(chapter_artifacts)} ready aligned chapters for {book_title}")
     if aligned_configs:
         report_path = os.path.join(book_dir, "reader_validation_report.json")
         if validate(Path(book_dir), Path(report_path)) != 0:

@@ -27,6 +27,11 @@ format and [`alignment_backend.py`](alignment_backend.py) for the backend bounda
 `CurrentGlobalAlignmentBackend` is only a compatibility wrapper around the
 existing aligner; it does not change production orchestration yet.
 
+Phase 3 adds [`chapter_resolver.py`](chapter_resolver.py) and makes the pipeline
+use the shared chapter artifact discovery path. Audio resolution remains explicit:
+zero candidates are missing, one is selectable, and multiple candidates are
+ambiguous.
+
 ## Phase 0 fixtures
 
 The synthetic fixtures in `fixtures/phase0/` describe one tiny book and are used

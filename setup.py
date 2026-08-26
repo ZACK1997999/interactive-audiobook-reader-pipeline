@@ -11,6 +11,7 @@ setup(
         "audio_resolver",
         "alignment_backend",
         "contract_adapters",
+        "chapter_resolver",
         "config",
         "dynamic_aligner",
         "extract_epub",
