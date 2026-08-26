@@ -48,7 +48,9 @@ def split_into_atomic_sentences(text):
     protected = re.sub(r'(\d+)\.(\d+)', r'\1__DOT__\2', protected)
     
     # Split pattern for terminal punctuation + quotes/parens + space + capital
-    pattern = re.compile(r'([.!?]+[\"\'”’\)]*)\s+(?=[\"\'“‘\(]?[A-Z0-9])')
+    # Footnote markers such as `.*` must remain with the preceding sentence
+    # while still allowing the boundary before the next sentence.
+    pattern = re.compile(r'([.!?]+[\"\'”’\)\*]*)\s+(?=[\"\'“‘\(]?[A-Z0-9])')
     tokens = pattern.split(protected)
     sentences = []
     
