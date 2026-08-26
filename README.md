@@ -23,6 +23,7 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`models.py`](models.py) | **Stable Internal Contracts**: Backend-neutral domain models introduced in Phase 1. |
 | [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
 | [`alignment_backend.py`](alignment_backend.py) | **Alignment Boundary**: Exposes the current aligner behind a replaceable backend interface. |
+| [`chapter_locator.py`](chapter_locator.py) | **Chapter Locator**: Fuzzy, evidence-bearing chapter-start discovery. |
 | [`CONTRACTS.md`](CONTRACTS.md) | **Contract Reference**: Object responsibilities and compatibility boundary. |
 | [`PHASE_0_BASELINE.md`](PHASE_0_BASELINE.md) | **Refactor Baseline**: Starting commit and scope of the synthetic contract fixtures. |
 | [`validate_outputs.py`](validate_outputs.py) | **Release Gate**: Blocks release for missing, weak, or inconsistent data. |

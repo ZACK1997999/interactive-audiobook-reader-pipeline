@@ -12,6 +12,7 @@ setup(
         "alignment_backend",
         "contract_adapters",
         "chapter_resolver",
+        "chapter_locator",
         "config",
         "dynamic_aligner",
         "extract_epub",

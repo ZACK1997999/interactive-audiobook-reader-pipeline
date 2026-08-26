@@ -32,6 +32,11 @@ use the shared chapter artifact discovery path. Audio resolution remains explici
 zero candidates are missing, one is selectable, and multiple candidates are
 ambiguous.
 
+Phase 4 adds [`chapter_locator.py`](chapter_locator.py), a backend-neutral,
+Storyteller-inspired fuzzy locator. It returns `resolved`, `ambiguous`, or
+`no-match` plus candidate evidence; it is not yet wired into automatic release
+selection.
+
 ## Phase 0 fixtures
 
 The synthetic fixtures in `fixtures/phase0/` describe one tiny book and are used
