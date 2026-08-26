@@ -147,25 +147,27 @@ def robust_monotonic_align(acoustic_words, sentences):
     
     return aligned
 
-# Test on Chapter 3
-with open("/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein/audio/range_ch03_acoustic_words.json") as f:
-    ac = json.load(f)["words"]
-with open("/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein/range_ch03_full_analysis.json") as f:
-    sents = json.load(f)
+if __name__ == "__main__":
+    # Historical diagnostic only. It intentionally uses a private local fixture and is
+    # not part of the supported release pipeline or the automatic test suite.
+    fixture_dir = "/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein"
+    with open(f"{fixture_dir}/audio/range_ch03_acoustic_words.json") as f:
+        ac = json.load(f)["words"]
+    with open(f"{fixture_dir}/range_ch03_full_analysis.json") as f:
+        sents = json.load(f)
 
-res = robust_monotonic_align(ac, sents)
-print(f"Total aligned sentences in Ch 3: {len(res)}")
-print(f"First sentence: {res[0]['start']}s - {res[0]['end']}s")
-print(f"Middle sentence (s-200): {res[200]['start']}s - {res[200]['end']}s ({res[200]['text'][:40]}...)")
-print(f"Sentence (s-300): {res[300]['start']}s - {res[300]['end']}s ({res[300]['text'][:40]}...)")
-print(f"Last sentence: {res[-1]['start']}s - {res[-1]['end']}s ({res[-1]['text'][:40]}...)")
+    res = robust_monotonic_align(ac, sents)
+    print(f"Total aligned sentences in Ch 3: {len(res)}")
+    print(f"First sentence: {res[0]['start']}s - {res[0]['end']}s")
+    print(f"Middle sentence (s-200): {res[200]['start']}s - {res[200]['end']}s ({res[200]['text'][:40]}...)")
+    print(f"Sentence (s-300): {res[300]['start']}s - {res[300]['end']}s ({res[300]['text'][:40]}...)")
+    print(f"Last sentence: {res[-1]['start']}s - {res[-1]['end']}s ({res[-1]['text'][:40]}...)")
 
-# Audit monotonicity
-issues = 0
-prev = -1
-for s in res:
-    if s['start'] < prev:
-        print(f"Non-monotonic in {s['id']}: prev={prev}, cur={s['start']}")
-        issues += 1
-    prev = s['start']
-print(f"Audit completed: {issues} non-monotonic issues!")
+    issues = 0
+    prev = -1
+    for sentence in res:
+        if sentence['start'] < prev:
+            print(f"Non-monotonic in {sentence['id']}: prev={prev}, cur={sentence['start']}")
+            issues += 1
+        prev = sentence['start']
+    print(f"Audit completed: {issues} non-monotonic issues!")
