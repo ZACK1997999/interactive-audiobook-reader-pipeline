@@ -9,6 +9,8 @@ setup(
         "acoustic_whisper",
         "models",
         "audio_resolver",
+        "alignment_backend",
+        "contract_adapters",
         "config",
         "dynamic_aligner",
         "extract_epub",

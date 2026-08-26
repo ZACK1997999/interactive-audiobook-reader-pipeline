@@ -22,6 +22,11 @@ adapter phase.
 All future backends must produce these concepts without exposing backend-specific
 objects to the HTML reader. `SCHEMA_VERSION` is currently `1.0`.
 
+Phase 2 adds [`contract_adapters.py`](contract_adapters.py) for the current JSON
+format and [`alignment_backend.py`](alignment_backend.py) for the backend boundary.
+`CurrentGlobalAlignmentBackend` is only a compatibility wrapper around the
+existing aligner; it does not change production orchestration yet.
+
 ## Phase 0 fixtures
 
 The synthetic fixtures in `fixtures/phase0/` describe one tiny book and are used

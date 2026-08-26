@@ -21,6 +21,8 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`html_builder.py`](html_builder.py) | **Static HTML Compiler**: Builds the multi-chapter interactive reader. |
 | [`audio_resolver.py`](audio_resolver.py) | **Audio Contract**: Resolves exactly one explicit chapter audio candidate. |
 | [`models.py`](models.py) | **Stable Internal Contracts**: Backend-neutral domain models introduced in Phase 1. |
+| [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
+| [`alignment_backend.py`](alignment_backend.py) | **Alignment Boundary**: Exposes the current aligner behind a replaceable backend interface. |
 | [`CONTRACTS.md`](CONTRACTS.md) | **Contract Reference**: Object responsibilities and compatibility boundary. |
 | [`PHASE_0_BASELINE.md`](PHASE_0_BASELINE.md) | **Refactor Baseline**: Starting commit and scope of the synthetic contract fixtures. |
 | [`validate_outputs.py`](validate_outputs.py) | **Release Gate**: Blocks release for missing, weak, or inconsistent data. |
