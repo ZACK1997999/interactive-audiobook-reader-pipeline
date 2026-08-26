@@ -68,6 +68,15 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertFalse(_chapter_audio_exists(audio_dir, 1))
             self.assertTrue(_chapter_audio_exists(audio_dir, 11))
 
+    def test_ambiguous_audio_candidates_block_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            (root / "audio" / "bonus_ch01.mp3").write_bytes(b"bonus")
+            self.assertIsNone(_find_chapter_audio(str(root / "audio"), 1))
+            self.assertFalse(_chapter_audio_exists(root / "audio", 1))
+            self.assertNotEqual(validate(root), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

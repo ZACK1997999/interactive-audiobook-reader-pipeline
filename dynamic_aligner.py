@@ -71,11 +71,14 @@ def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_
             ws = max(st, float(start_word["start"]))
             we = max(ws, float(end_word["end"]))
         else:
-            previous = [mapped_word_ranges[i][0] for i in range(word_index) if i in mapped_word_ranges]
+            previous = [mapped_word_ranges[i][1] for i in range(word_index) if i in mapped_word_ranges]
             following = [mapped_word_ranges[i][0] for i in range(word_index + 1, len(raw_words)) if i in mapped_word_ranges]
             if previous and following:
-                ws = st + (et - st) * (word_index / max(1, len(raw_words)))
-                we = st + (et - st) * ((word_index + 1) / max(1, len(raw_words)))
+                left = acoustic_words[previous[-1]]["end"]
+                right = acoustic_words[following[0]]["start"]
+                gap_fraction = 1 / (len(raw_words) - word_index + 1)
+                ws = float(left) + (float(right) - float(left)) * max(0.0, gap_fraction - 0.5)
+                we = float(left) + (float(right) - float(left)) * min(1.0, gap_fraction + 0.5)
             else:
                 ws = st + (et - st) * (word_index / max(1, len(raw_words)))
                 we = st + (et - st) * ((word_index + 1) / max(1, len(raw_words)))

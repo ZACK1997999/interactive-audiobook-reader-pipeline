@@ -1,11 +1,8 @@
 """
 Module: pipeline.py
-Description: Universal Master CLI Orchestrator for the Interactive Audiobook Reader Pipeline.
-Supports 100% autonomous end-to-end processing of any book:
-- EPUB canonical sentence extraction
-- Local Apple Silicon MLX Whisper acoustic extraction
-- Full-chapter non-monotonic global sequence alignment (handling out-of-order sidebars & fables)
-- Zero-jitter interactive HTML master reader compilation
+Description: Release orchestrator for prepared audiobook-reader artifacts.
+It aligns, validates, and compiles prepared chapter data. EPUB extraction and MLX Whisper
+transcription are separate preparation stages.
 """
 
 import os
@@ -22,20 +19,13 @@ sys.path.append(PIPELINE_DIR)
 from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
 from validate_outputs import validate
+from audio_resolver import resolve_chapter_audio
 
 
 def _find_chapter_audio(audio_dir, chapter_number):
-    """Find only filenames that explicitly encode this chapter number."""
-    canonical = os.path.join(audio_dir, f"chapter_{chapter_number:02d}.mp3")
-    if os.path.exists(canonical):
-        return canonical
-    candidates = []
-    chapter_pattern = re.compile(r"(?<!\d)(?:chapter|ch)[ _-]*(\d+)(?!\d)", re.IGNORECASE)
-    for candidate in glob.glob(os.path.join(audio_dir, "*.mp3")):
-        match = chapter_pattern.search(os.path.basename(candidate))
-        if match and int(match.group(1)) == chapter_number:
-            candidates.append(candidate)
-    return candidates[0] if len(candidates) == 1 else None
+    """Return a path only when exactly one explicit chapter candidate exists."""
+    resolution = resolve_chapter_audio(audio_dir, chapter_number)
+    return str(resolution.path) if resolution.path else None
 
 def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None, force_realign=False):
     """
