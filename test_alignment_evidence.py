@@ -43,6 +43,13 @@ class AlignmentEvidenceTests(unittest.TestCase):
         self.assertEqual(result["word_spans"][1]["start"], 2)
         self.assertEqual(result["word_spans"][2]["start"], 3)
 
+    def test_unmatched_word_is_interpolated_between_adjacent_matches(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("alpha beta".split())]
+        item = self.run_alignment(words, [{"id": "s-1", "text": "alpha UNKNOWN beta"}])[0]
+        unknown = item["word_spans"][1]
+        self.assertGreaterEqual(unknown["start"], 0.5)
+        self.assertLessEqual(unknown["end"], 1.0)
+
     def test_ambiguous_short_sentence_requires_review(self):
         words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("No. Maybe no.".split())]
         item = self.run_alignment(words, [{"id": "s-1", "text": "No."}])[0]

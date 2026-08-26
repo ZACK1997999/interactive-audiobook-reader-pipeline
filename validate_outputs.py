@@ -4,17 +4,13 @@ import argparse
 import json
 import re
 from pathlib import Path
+from audio_resolver import resolve_chapter_audio
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 
 def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
-    """Accept only the canonical name or filenames that explicitly encode the chapter."""
-    canonical = audio_dir / f"chapter_{number:02d}.mp3"
-    if canonical.exists():
-        return True
-    pattern = re.compile(rf"(?<!\d)(?:chapter|ch)[ _-]*0*{number}(?!\d)", re.IGNORECASE)
-    candidates = [path for path in audio_dir.glob("*.mp3") if pattern.search(path.name)]
-    return bool(candidates)
+    """Return true only when the shared resolver finds exactly one candidate."""
+    return resolve_chapter_audio(audio_dir, number).status == "ok"
 
 
 def validate(book_dir: Path, report_path=None):
@@ -53,8 +49,13 @@ def validate(book_dir: Path, report_path=None):
                 record["analysis_records"] = len(analysis_data)
             except Exception as exc:
                 errors.append(f"{analysis.name}: invalid JSON ({exc})")
-        if number is not None and not _chapter_audio_exists(book_dir / "audio", number):
-            errors.append(f"{label}: chapter audio file missing")
+        if number is not None:
+            audio_resolution = resolve_chapter_audio(book_dir / "audio", number)
+            if audio_resolution.status == "missing":
+                errors.append(f"{label}: chapter audio file missing")
+            elif audio_resolution.status == "ambiguous":
+                names = ", ".join(path.name for path in audio_resolution.candidates)
+                errors.append(f"{label}: ambiguous chapter audio candidates ({names})")
 
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
         if not aligned.exists():

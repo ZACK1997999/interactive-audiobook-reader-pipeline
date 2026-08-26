@@ -19,6 +19,7 @@ reader-validate = "validate_outputs:main"
 [tool.setuptools]
 py-modules = [
   "acoustic_whisper",
+  "audio_resolver",
   "config",
   "dynamic_aligner",
   "extract_epub",

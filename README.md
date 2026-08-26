@@ -1,6 +1,6 @@
 # 📖 Interactive Audiobook Reader Pipeline Workspace
 
-This workspace contains the complete, modular industrial toolchain for transforming any **EPUB book** and **studio audiobook MP3 tracks** into an **Apple Books-grade standalone interactive reader** with:
+This workspace contains a reusable toolchain for turning prepared chapter artifacts from an **EPUB**, linguistic analysis, and audiobook timestamps into an **Apple Books-grade standalone interactive reader** with:
 - **Top-left chapter switcher dropdown**
 - **Evidence-gated word-by-word karaoke synchronization**
 - **Unified tap interaction (point-and-play + dynamic-equivalent translation & C1/C2 vocabulary card)**
@@ -14,18 +14,19 @@ This workspace contains the complete, modular industrial toolchain for transform
 
 | Script | Function |
 | :--- | :--- |
-| [`pipeline.py`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/pipeline.py) | **Master CLI Orchestrator**: Runs any or all stages of the pipeline in one command. |
-| [`extract_epub.py`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/extract_epub.py) | **EPUB Extractor**: Splits raw XHTML into 100% unabridged atomic sentences with abbreviation protection. |
-| [`acoustic_whisper.py`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/acoustic_whisper.py) | **Acoustic Engine**: Runs `mlx-community/whisper-large-v3-turbo` on Apple Silicon GPU/ANE for word-level timestamps. |
-| [`dynamic_aligner.py`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/dynamic_aligner.py) | **Alignment Engine**: Global `SequenceMatcher` anchoring + buffer padding (`-0.15s / +0.30s`). |
-| [`html_builder.py`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/html_builder.py) | **Static HTML Compiler**: Pre-renders the multi-chapter reader with zero-jitter karaoke tracking. |
+| [`pipeline.py`](pipeline.py) | **Release Orchestrator**: Aligns, validates, and compiles prepared chapter artifacts. |
+| [`extract_epub.py`](extract_epub.py) | **EPUB Extractor**: Splits raw XHTML into unabridged atomic sentences. |
+| [`acoustic_whisper.py`](acoustic_whisper.py) | **Acoustic Engine**: Runs MLX Whisper for word-level timestamps. |
+| [`dynamic_aligner.py`](dynamic_aligner.py) | **Alignment Engine**: Global matching with evidence-bearing word spans. |
+| [`html_builder.py`](html_builder.py) | **Static HTML Compiler**: Builds the multi-chapter interactive reader. |
+| [`audio_resolver.py`](audio_resolver.py) | **Audio Contract**: Resolves exactly one explicit chapter audio candidate. |
 | [`validate_outputs.py`](validate_outputs.py) | **Release Gate**: Blocks release for missing, weak, or inconsistent data. |
 | [`LINGUISTIC_ANALYSIS_PROMPT.md`](LINGUISTIC_ANALYSIS_PROMPT.md) | **Gemini contract**: Context-first language analysis using the existing JSON schema. |
 | [`REPRODUCE.md`](REPRODUCE.md) | **Reproduction guide**: Setup, contracts, privacy boundary, and handoff. |
 | [`config.example.json`](config.example.json) | **Configuration template**: Book metadata and private input locations. |
 | [`LEGACY_EXPERIMENTS.md`](LEGACY_EXPERIMENTS.md) | **Boundary**: Identifies historical book-specific scripts that are not the supported release path. |
 | [`archive/legacy-experiments/`](archive/legacy-experiments/) | **Archive**: Historical book-specific and hardcoded helpers retained for reference only. |
-| [`SPECIFICATION.md`](file:///Users/lindy/Vault/My%20Python%20Productivity%20Script%202/interactive_reader_pipeline/SPECIFICATION.md) | **Engineering Standard**: Full architecture, typography rules, CSS variables, and design specs. |
+| [`SPECIFICATION.md`](SPECIFICATION.md) | **Engineering Standard**: Full architecture, typography rules, CSS variables, and design specs. |
 | [`pyproject.toml`](pyproject.toml) | **Installable package metadata**: Installs the reusable CLI entry points. |
 
 ---
