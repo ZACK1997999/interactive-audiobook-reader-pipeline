@@ -48,9 +48,7 @@ def split_into_atomic_sentences(text):
     protected = re.sub(r'(\d+)\.(\d+)', r'\1__DOT__\2', protected)
     
     # Split pattern for terminal punctuation + quotes/parens + space + capital
-    # Footnote markers such as `.*` must remain with the preceding sentence
-    # while still allowing the boundary before the next sentence.
-    pattern = re.compile(r'([.!?]+[\"\'”’\)\*]*)\s+(?=[\"\'“‘\(]?[A-Z0-9])')
+    pattern = re.compile(r'([.!?]+[\"\'”’\)]*)\s+(?=[\"\'“‘\(]?[A-Z0-9])')
     tokens = pattern.split(protected)
     sentences = []
     
@@ -144,27 +142,6 @@ def extract_chapter_from_epub(epub_path, chapter_internal_path, out_json_path):
         json.dump(canonical_items, f, ensure_ascii=False, indent=2)
         
     print(f"Extracted {len(canonical_items)} canonical sentences from {chapter_internal_path} -> {out_json_path}")
-    return canonical_items
-
-def extract_chapter_from_text(text_path, out_json_path):
-    """Extract a chapter from a plain-text ebook export."""
-    canonical_items, s_idx = [], 0
-    lines = [line.strip() for line in open(text_path, encoding='utf-8').read().splitlines() if line.strip()]
-    while lines and ('ebook' in lines[0].lower() or 'subscriber' in lines[0].lower() or 'sign up' in lines[0].lower()):
-        lines.pop(0)
-    if lines and not re.search(r'[.!?]$', lines[0]):
-        canonical_items.append({'id': 's-0', 'elem_idx': 0, 'tag': 'h1', 'text': lines.pop(0), 'is_heading': True})
-        s_idx = 1
-    # Plain-text exports often put italicized words on separate lines. Joining
-    # all remaining lines prevents artificial sentence breaks inside a paragraph.
-    body = re.sub(r'\s+', ' ', ' '.join(lines)).strip()
-    body = re.sub(r'\s+([,.;:!?])', r'\1', body)
-    for sentence in split_into_atomic_sentences(body):
-        canonical_items.append({'id': f's-{s_idx}', 'elem_idx': 1, 'tag': 'p', 'text': sentence, 'is_heading': False})
-        s_idx += 1
-    with open(out_json_path, 'w', encoding='utf-8') as f:
-        json.dump(canonical_items, f, ensure_ascii=False, indent=2)
-    print(f'Extracted {len(canonical_items)} canonical sentences from {text_path} -> {out_json_path}')
     return canonical_items
 
 if __name__ == "__main__":

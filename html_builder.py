@@ -7,17 +7,6 @@ import json
 import html
 import os
 import sys
-import re
-
-_MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
-
-def chapter_status(sentences):
-    """Return a conservative UI status; uncertain data must be visible."""
-    if any(not s.get('word_spans') for s in sentences if not s.get('is_heading')):
-        return 'review-required'
-    if any(_MULTI_BOUNDARY.search(s.get('text', '')) for s in sentences if not s.get('is_heading')):
-        return 'review-required'
-    return 'verified'
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path):
     """
@@ -35,11 +24,10 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
             'num': c['num'],
             'title': c['title'],
             'audio': c['audio'],
-            'sentences': sents,
-            'status': c.get('status') or chapter_status(sents)
+            'sentences': sents
         })
         
-    first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_01.mp3"
+    first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_00.mp3"
     
     html_head = f"""<!DOCTYPE html>
 <html lang="en" data-theme="sepia">
@@ -111,16 +99,15 @@ body {{
   -webkit-font-smoothing: antialiased;
 }}
 
-/* Sticky Ultra-Clean Top Bar */
+/* Top Sticky Navigation Bar */
 .top-nav {{
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 1000;
   background: var(--bg-page);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  box-shadow: var(--card-shadow);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+  backdrop-filter: blur(8px);
 }}
 
 .nav-bar {{
@@ -130,83 +117,75 @@ body {{
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
 }}
 
-/* Chapter Switcher Menu in Top-Left */
 .chapter-nav-wrapper {{
   position: relative;
-  display: inline-block;
+  flex: 1;
+  min-width: 0;
 }}
 
 .chapter-btn {{
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--accent);
-  font-family: var(--font-sans);
-  font-size: 0.92rem;
-  font-weight: 700;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: var(--font-sans);
+  font-size: 0.90rem;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: all 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
 }}
 
 .chapter-btn:hover {{
-  background: var(--bg-panel);
-  border-color: var(--border);
+  background: var(--bg-hover);
+  border-color: var(--accent-light);
 }}
 
 .dropdown-arrow {{
   font-size: 0.75rem;
-  opacity: 0.7;
+  color: var(--text-sub);
 }}
 
 .chapter-dropdown {{
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 6px;
-  width: 320px;
-  max-height: 70vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--card-shadow);
   display: none;
-  flex-direction: column;
-  z-index: 200;
-  animation: fadeIn 0.15s ease;
-}}
-
-.chapter-dropdown::-webkit-scrollbar {{
-  width: 5px;
-}}
-.chapter-dropdown::-webkit-scrollbar-thumb {{
-  background: var(--border);
-  border-radius: 4px;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--card-shadow);
+  padding: 6px 0;
+  z-index: 2000;
 }}
 
 .chapter-dropdown.open {{
-  display: flex;
+  display: block;
 }}
 
 .chapter-item {{
-  padding: 10px 14px;
+  padding: 8px 14px;
   font-family: var(--font-sans);
   font-size: 0.88rem;
   color: var(--text-main);
-  text-decoration: none;
   cursor: pointer;
-  border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  border-bottom: 1px solid var(--border);
   transition: background 0.15s ease;
 }}
 
@@ -219,41 +198,18 @@ body {{
 }}
 
 .chapter-item.active {{
-  background: var(--bg-hover);
-  border-left: 3.5px solid var(--accent);
-  font-weight: 700;
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-weight: 600;
+  border-left: 3px solid var(--accent);
 }}
 
 .chapter-item-tag {{
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  color: var(--accent);
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}}
-.status-tag {{
-  margin-left: auto;
-  font-size: 0.68rem;
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-weight: 700;
-  letter-spacing: .2px;
-  display: none;
-}}
-.diagnostics-mode .status-tag {{ display: inline-block; }}
-.diagnostics-panel {{
-  display: none;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
   color: var(--text-sub);
-  font-size: 0.8rem;
-  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }}
-.diagnostics-mode #diagnosticsPanel {{ display: block; }}
-#drawerTips.open {{ display: block; }}
-.status-verified {{ color: #166534; background: #dcfce7; }}
-.status-review-required {{ color: #92400e; background: #fef3c7; }}
 
 .nav-actions {{
   display: flex;
@@ -265,22 +221,21 @@ body {{
   background: var(--bg-panel);
   border: 1px solid var(--border);
   color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 8px;
   font-family: var(--font-sans);
-  font-size: 0.84rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  border-radius: 6px;
-  padding: 5px 12px;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   transition: all 0.2s ease;
-  -webkit-tap-highlight-color: transparent;
 }}
 
 .icon-btn:hover {{
   background: var(--bg-hover);
-  border-color: var(--accent);
+  border-color: var(--accent-light);
 }}
 
 .icon-btn.primary {{
@@ -288,23 +243,21 @@ body {{
   color: #ffffff;
   border-color: var(--accent);
 }}
+
 .icon-btn.primary:hover {{
   filter: brightness(1.1);
 }}
 
 /* Collapsible Control Drawer */
 .control-drawer {{
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s ease;
+  display: none;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  padding: 0 16px;
+  padding: 12px 16px;
 }}
 
 .control-drawer.open {{
-  max-height: 360px;
-  padding: 12px 16px 14px;
+  display: block;
 }}
 
 .drawer-inner {{
@@ -312,13 +265,19 @@ body {{
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+}}
+
+.control-drawer audio {{
+  width: 100%;
+  height: 38px;
+  border-radius: 6px;
 }}
 
 .drawer-row {{
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
 }}
@@ -329,33 +288,50 @@ body {{
   gap: 6px;
 }}
 
-audio {{
-  width: 100%;
-  height: 36px;
-  border-radius: 8px;
-  outline: none;
-}}
-
 .search-input {{
-  width: 100%;
-  font-family: var(--font-sans);
-  font-size: 0.88rem;
-  padding: 7px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
   background: var(--bg-page);
+  border: 1px solid var(--border);
   color: var(--text-main);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
   outline: none;
-}}
-.search-input:focus {{
-  border-color: var(--accent);
+  width: 100%;
 }}
 
-/* Main Container */
+.drawer-tips {{
+  display: none;
+  font-family: var(--font-sans);
+  font-size: 0.80rem;
+  color: var(--text-sub);
+  background: var(--bg-page);
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}}
+
+.drawer-tips.open {{
+  display: block;
+}}
+
+.tips-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}}
+
+.tips-key {{
+  font-weight: 600;
+  color: var(--accent);
+  margin-right: 4px;
+}}
+
+/* Main Layout */
 .container {{
   max-width: var(--max-content-width);
-  margin: 20px auto;
-  padding: 0 18px;
+  margin: 28px auto;
+  padding: 0 20px;
 }}
 
 .chapter-section {{
@@ -364,101 +340,87 @@ audio {{
 
 .chapter-section.active {{
   display: block;
-  animation: fadeIn 0.2s ease;
 }}
 
 .book-header {{
-  margin-bottom: 28px;
   text-align: center;
-  border-bottom: 2px solid var(--border);
+  margin-bottom: 36px;
   padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
 }}
 
 .book-subtitle {{
   font-family: var(--font-sans);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   text-transform: uppercase;
-  letter-spacing: 2px;
-  color: var(--text-sub);
-  margin-bottom: 6px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  margin-bottom: 8px;
 }}
 
 .book-title {{
-  font-size: 1.95rem;
+  font-size: 2.1rem;
   font-weight: 700;
-  line-height: 1.3;
-  color: var(--accent);
+  line-height: 1.25;
+  margin-bottom: 10px;
 }}
 
 .book-author {{
   font-family: var(--font-sans);
   font-size: 0.95rem;
   color: var(--text-sub);
-  margin-top: 6px;
 }}
 
-/* Pure Sentence Units (100% Clean Book Flow, Zero Box Background) */
+/* Sentence Units & Tap Inspection */
 .sentence-unit {{
-  margin-bottom: 6px;
-  padding: 2px 0;
-  position: relative;
-}}
-
-/* Focused Word-by-Word Luminous Highlighting (Zero Jitter, Zero Box Background) */
-.w {{
-  display: inline;
-  border-radius: 3px;
-  padding: 1px 2px;
-  transition: background-color 0.08s ease, color 0.08s ease;
-}}
-
-.w.active-word {{
-  background-color: var(--word-highlight-bg);
-  color: var(--word-highlight-text);
-  border-radius: 3px;
-}}
-
-.sentence-unit:hover .s-content {{
-  text-decoration: underline;
-  text-decoration-color: var(--accent-light);
-  text-decoration-thickness: 1.5px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
 }}
 
 .sentence-text {{
   cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}}
+
+.sentence-text:hover {{
+  background: var(--bg-hover);
+}}
+
+.sentence-unit.active .sentence-text {{
+  background: var(--bg-panel);
+}}
+
+.sentence-unit[data-matched="0"] .sentence-text {{
+  opacity: 0.92;
+}}
+
+.w {{
   display: inline;
-  -webkit-tap-highlight-color: transparent;
+  padding: 1px 0;
+  border-radius: 3px;
+  transition: background 0.1s ease, color 0.1s ease;
 }}
 
-.s-content {{
-  transition: all 0.15s;
+.w.active-word {{
+  background-color: var(--word-highlight-bg) !important;
+  color: var(--word-highlight-text) !important;
+  font-weight: 600;
+  border-radius: 3px;
 }}
 
-/* Inspection Panel (Clean, Rounded Card, Click to Collapse) */
+/* Collapsible Inspection Card */
 .inspect-panel {{
   display: none;
-  margin: 8px 0 14px 0;
-  padding: 12px 16px;
   background: var(--bg-panel);
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  font-family: var(--font-sans);
-  font-size: 0.94rem;
-  line-height: 1.62;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 14px;
+  margin: 6px 0 14px 6px;
   box-shadow: var(--card-shadow);
   cursor: pointer;
-  position: relative;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  animation: fadeIn 0.16s ease;
-}}
-
-.inspect-panel:hover {{
-  border-color: var(--accent-light);
-}}
-
-@keyframes fadeIn {{
-  from {{ opacity: 0; transform: translateY(-4px); }}
-  to {{ opacity: 1; transform: translateY(0); }}
 }}
 
 .sentence-unit.active .inspect-panel {{
@@ -466,29 +428,48 @@ audio {{
 }}
 
 .inspect-trans {{
-  font-weight: 500;
+  font-family: var(--font-serif);
+  font-size: 1.02rem;
+  line-height: 1.72;
   color: var(--text-main);
+  margin-bottom: 8px;
 }}
 
 .inspect-vocab-list {{
-  margin-top: 8px;
-  border-top: 1px dashed var(--border);
+  border-top: 1px solid var(--border);
   padding-top: 6px;
+  margin-top: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }}
 
 .vocab-row {{
-  font-size: 0.90rem;
+  font-family: var(--font-sans);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }}
-.v-word {{ font-weight: 700; color: var(--accent); margin-right: 6px; }}
-.v-pos {{ font-style: italic; color: var(--text-sub); margin-right: 6px; font-size: 0.82rem; }}
-.v-def {{ color: var(--text-sub); }}
 
-/* Heading styles */
+.v-word {{
+  font-weight: 700;
+  color: var(--accent);
+}}
+
+.v-pos {{
+  font-size: 0.72rem;
+  color: var(--text-sub);
+  font-style: italic;
+}}
+
+.v-def {{
+  color: var(--text-main);
+}}
+
 .chapter-heading-1 {{
-  font-size: 1.45rem;
+  font-size: 1.35rem;
   font-weight: 700;
   margin-top: 32px;
   margin-bottom: 12px;
@@ -532,7 +513,7 @@ audio {{
   <div class="nav-bar">
     <div class="chapter-nav-wrapper">
       <button class="chapter-btn" id="chapterSelectBtn" onclick="toggleChapterDropdown(event)">
-        <span>📖 {html.escape(book_title)} · <span id="currentChapterLabel">Ch. 1</span></span>
+        <span>📖 {html.escape(book_title)} · <span id="currentChapterLabel">Ch. 0</span></span>
         <span class="dropdown-arrow">▾</span>
       </button>
       <div class="chapter-dropdown" id="chapterDropdown">
@@ -541,11 +522,11 @@ audio {{
     for ch in loaded_chapters:
         cnum = ch["num"]
         ctitle = ch["title"]
-        active_cls = " active" if cnum == 1 else ""
+        label = "Preface" if cnum == 0 else f"Chapter {cnum}"
+        active_cls = " active" if cnum == 0 else ""
         html_head += f"""        <div class="chapter-item{active_cls}" id="menu-ch-{cnum}" onclick="switchChapter({cnum})">
-          <span class="chapter-item-tag">Chapter {cnum}</span>
+          <span class="chapter-item-tag">{label}</span>
           <span>{html.escape(ctitle)}</span>
-          <span class="status-tag status-{ch['status']}">{html.escape(ch['status'])}</span>
         </div>\n"""
 
     html_head += f"""      </div>
@@ -564,11 +545,8 @@ audio {{
         <div class="drawer-group">
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
           <button class="icon-btn" onclick="adjustFontSize(1)">A+</button>
-          <button class="icon-btn" onclick="toggleTheme()">📜 Theme</button>
+          <button class="icon-btn" onclick="toggleTheme()">Theme</button>
           <button class="icon-btn" id="tipsToggleBtn" onclick="toggleTips()">Tips</button>
-        </div>
-        <div class="drawer-group">
-          <button class="icon-btn" id="diagnosticsBtn" onclick="toggleDiagnostics()">Diagnostics</button>
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; display: flex; align-items: center; gap: 4px; color: var(--text-sub);">
@@ -576,15 +554,16 @@ audio {{
           </label>
         </div>
       </div>
-      <div class="diagnostics-panel" id="diagnosticsPanel">
-        <strong>System diagnostics</strong><br>
-        Status labels are hidden from the reading flow. Open the chapter menu to inspect processing status.
-      </div>
-      <div class="diagnostics-panel" id="drawerTips">
-        <strong>Reading &amp; Listening Tips</strong><br>
-        Click English to play and show the translation. Click the translation to hide it. Use arrow keys to move between sentences. Press Space to show or hide the current translation.
-      </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
+      <div class="drawer-tips" id="drawerTips">
+        <div class="tips-grid">
+          <div class="tips-item"><span class="tips-key">Tap English</span> Replay sentence & show breakdown</div>
+          <div class="tips-item"><span class="tips-key">Tap Chinese</span> Collapse card</div>
+          <div class="tips-item"><span class="tips-key">Spacebar</span> Toggle translation & vocabulary</div>
+          <div class="tips-item"><span class="tips-key">← / ↑</span> Jump to previous sentence</div>
+          <div class="tips-item"><span class="tips-key">→ / ↓</span> Jump to next sentence</div>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -597,15 +576,16 @@ audio {{
         ctitle = ch["title"]
         caudio = ch["audio"]
         csents = ch["sentences"]
-        active_cls = " active" if cnum == 1 else ""
+        active_cls = " active" if cnum == 0 else ""
+        ch_heading_label = "PREFACE" if cnum == 0 else f"CHAPTER {cnum}"
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->
   <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{caudio}" data-ch="{cnum}">
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
-      <h1 class="book-title">CHAPTER {cnum}<br>{html.escape(ctitle)}</h1>
-      <div class="book-author">{html.escape(book_author)} · <span class="status-tag status-{ch['status']}">{html.escape(ch['status'])}</span></div>
+      <h1 class="book-title">{ch_heading_label}<br>{html.escape(ctitle)}</h1>
+      <div class="book-author">{html.escape(book_author)}</div>
     </header>
 
     <div class="book-content">
@@ -616,6 +596,7 @@ audio {{
             is_h = s.get("is_heading", False)
             start = s.get("start", 0.0)
             end = s.get("end", 0.0)
+            has_match = 1 if s.get("has_audio_match", True) and (end > start) else 0
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
             
@@ -644,22 +625,10 @@ audio {{
             if vocab_html_list:
                 vocab_section = f'<div class="inspect-vocab-list">{"".join(vocab_html_list)}</div>'
                 
-            if is_h:
-                html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}">
-        <div class="sentence-text chapter-heading-1" onclick="handleSentenceClick(event, '{sid}', {start}, {end})">
-          <span class="s-content">{sentence_text_html}</span>
-        </div>
-        <div class="inspect-panel" onclick="handleInspectPanelClick(event, '{sid}')" title="Click to collapse / 点击折叠">
-          <div class="inspect-trans">{trans}</div>
-          {vocab_section}
-        </div>
-      </div>
-"""
-            else:
-                html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}">
-        <div class="sentence-text" onclick="handleSentenceClick(event, '{sid}', {start}, {end})">
+            h_class = " chapter-heading-1" if is_h else ""
+            html_head += f"""
+      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}">
+        <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
           <span class="s-content">{sentence_text_html}</span>
         </div>
         <div class="inspect-panel" onclick="handleInspectPanelClick(event, '{sid}')" title="Click to collapse / 点击折叠">
@@ -683,26 +652,11 @@ const controlDrawer = document.getElementById('controlDrawer');
 const drawerToggleBtn = document.getElementById('drawerToggleBtn');
 const chapterDropdown = document.getElementById('chapterDropdown');
 const currentChapterLabel = document.getElementById('currentChapterLabel');
-const diagnosticsBtn = document.getElementById('diagnosticsBtn');
 
-let activeChapterNum = parseInt(localStorage.getItem('book_active_ch') || '1', 10);
+let activeChapterNum = parseInt(localStorage.getItem('book_active_ch') || '0', 10);
 let autoScrollEnabled = localStorage.getItem('book_autoscroll') !== 'false';
 let currentPlayingId = null;
 let currentActiveWordEl = null;
-let diagnosticsEnabled = localStorage.getItem('book_diagnostics') === 'true';
-
-function applyDiagnostics() {
-  document.body.classList.toggle('diagnostics-mode', diagnosticsEnabled);
-  diagnosticsBtn.textContent = diagnosticsEnabled ? 'Hide diagnostics' : 'Diagnostics';
-}
-
-function toggleDiagnostics() {
-  diagnosticsEnabled = !diagnosticsEnabled;
-  localStorage.setItem('book_diagnostics', diagnosticsEnabled);
-  applyDiagnostics();
-}
-
-applyDiagnostics();
 
 document.getElementById('autoScrollCheck').checked = autoScrollEnabled;
 
@@ -726,7 +680,7 @@ function closeDropdowns(event) {
 function switchChapter(chNum) {
   activeChapterNum = chNum;
   localStorage.setItem('book_active_ch', chNum);
-  currentChapterLabel.textContent = 'Ch. ' + chNum;
+  currentChapterLabel.textContent = chNum === 0 ? 'Preface' : 'Ch. ' + chNum;
   
   document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('active'));
   const menuEl = document.getElementById('menu-ch-' + chNum);
@@ -754,7 +708,7 @@ function switchChapter(chNum) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-if (activeChapterNum !== 1) {
+if (activeChapterNum !== 0) {
   switchChapter(activeChapterNum);
 }
 
@@ -798,34 +752,37 @@ function adjustFontSize(delta) {
   localStorage.setItem('book_font_size', currentFontSizeRem);
 }
 
-function toggleTips() {
-  const tips = document.getElementById('drawerTips');
-  if (tips) tips.classList.toggle('open');
-}
-
 const savedFontSize = localStorage.getItem('book_font_size');
 if (savedFontSize) {
   currentFontSizeRem = parseFloat(savedFontSize);
   document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
 }
 
-function handleSentenceClick(event, id, start, end) {
+function toggleTips() {
+  const tipsEl = document.getElementById('drawerTips');
+  const btn = document.getElementById('tipsToggleBtn');
+  if (tipsEl) {
+    tipsEl.classList.toggle('open');
+    if (btn) btn.classList.toggle('active');
+  }
+}
+
+function handleSentenceClick(event, id, start, end, hasMatch) {
   if (event) event.stopPropagation();
   const el = document.getElementById(id);
   if (!el) return;
   
   localStorage.setItem('book_last_sentence_c' + activeChapterNum, id);
-  audio.currentTime = start;
-  audio.play();
-  globalPlayBtn.textContent = '⏸ Pause';
-  
-  // Clicking English sentence always opens the card and replays audio
+  if (start > 0 || hasMatch) {
+    audio.currentTime = start;
+    audio.play();
+    globalPlayBtn.textContent = '⏸ Pause';
+  }
   el.classList.add('active');
 }
 
 function handleInspectPanelClick(event, id) {
   if (event) event.stopPropagation();
-  // Don't collapse if user is selecting/copying text
   const selection = window.getSelection();
   if (selection && selection.toString().trim().length > 0) return;
   
@@ -834,40 +791,6 @@ function handleInspectPanelClick(event, id) {
     el.classList.remove('active');
   }
 }
-
-function toggleCurrentTranslation() {
-  const activeSection = document.querySelector('.chapter-section.active');
-  if (!activeSection) return;
-  const units = Array.from(activeSection.querySelectorAll('.sentence-unit'));
-  let unit = units.find(u => u.id === currentPlayingId);
-  if (!unit) unit = units[0];
-  if (unit) unit.classList.toggle('active');
-}
-
-window.addEventListener('keydown', (event) => {
-  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-  const activeSection = document.querySelector('.chapter-section.active');
-  if (!activeSection) return;
-  const units = Array.from(activeSection.querySelectorAll('.sentence-unit'));
-  if (!units.length) return;
-  let index = units.findIndex(u => u.id === currentPlayingId);
-  if (index < 0) {
-    index = units.findIndex(u => audio.currentTime >= parseFloat(u.dataset.start) && audio.currentTime <= parseFloat(u.dataset.end));
-    if (index < 0) index = 0;
-  }
-  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'ArrowRight' || event.key === 'ArrowDown') {
-    event.preventDefault();
-    const next = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? Math.max(0, index - 1) : Math.min(units.length - 1, index + 1);
-    const target = units[next];
-    audio.currentTime = parseFloat(target.dataset.start);
-    audio.play();
-    target.classList.add('active');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  } else if (event.key === ' ' || event.code === 'Space') {
-    event.preventDefault();
-    toggleCurrentTranslation();
-  }
-});
 
 function toggleGlobalPlay() {
   if (audio.paused) {
@@ -888,13 +811,13 @@ function syncPlayback() {
     const activeSection = document.querySelector('.chapter-section.active');
     
     if (activeSection) {
-      const sentenceUnits = activeSection.querySelectorAll('.sentence-unit');
+      const sentenceUnits = activeSection.querySelectorAll('.sentence-unit[data-matched="1"]');
       let activeUnit = null;
       
       for (let u of sentenceUnits) {
         const s = parseFloat(u.dataset.start);
         const e = parseFloat(u.dataset.end);
-        if (curTime >= s && curTime <= e) {
+        if (curTime >= s && curTime < e) {
           activeUnit = u;
           break;
         }
@@ -907,7 +830,7 @@ function syncPlayback() {
           
           if (autoScrollEnabled) {
             const rect = activeUnit.getBoundingClientRect();
-            const inView = rect.top >= 70 && rect.bottom <= (window.innerHeight - 70);
+            const inView = rect.top >= 90 && rect.bottom <= (window.innerHeight - 90);
             if (!inView) {
               activeUnit.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -919,7 +842,7 @@ function syncPlayback() {
         for (let w of wordEls) {
           const ws = parseFloat(w.dataset.s);
           const we = parseFloat(w.dataset.e);
-          if (curTime >= ws && curTime <= we) {
+          if (ws < we && curTime >= ws && curTime < we) {
             foundWord = w;
             break;
           }
@@ -962,13 +885,73 @@ function handleSearch() {
     }
   }
 }
+
+// Desktop Keyboard Navigation (Arrow Keys + Spacebar)
+window.addEventListener('keydown', (e) => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+    return;
+  }
+  
+  const activeSection = document.querySelector('.chapter-section.active');
+  if (!activeSection) return;
+  
+  const units = Array.from(activeSection.querySelectorAll('.sentence-unit'));
+  if (units.length === 0) return;
+  
+  const curTime = audio.currentTime;
+  
+  let currentIndex = units.findIndex(u => {
+    const s = parseFloat(u.dataset.start);
+    const e = parseFloat(u.dataset.end);
+    return curTime >= s && curTime <= e;
+  });
+  
+  if (currentIndex === -1) {
+    for (let i = units.length - 1; i >= 0; i--) {
+      if (parseFloat(units[i].dataset.start) <= curTime) {
+        currentIndex = i;
+        break;
+      }
+    }
+    if (currentIndex === -1) currentIndex = 0;
+  }
+  
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const targetIdx = Math.max(0, currentIndex - 1);
+    const targetUnit = units[targetIdx];
+    if (targetUnit) {
+      const st = parseFloat(targetUnit.dataset.start);
+      audio.currentTime = st;
+      audio.play();
+      globalPlayBtn.textContent = '⏸ Pause';
+      targetUnit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const targetIdx = Math.min(units.length - 1, currentIndex + 1);
+    const targetUnit = units[targetIdx];
+    if (targetUnit) {
+      const st = parseFloat(targetUnit.dataset.start);
+      audio.currentTime = st;
+      audio.play();
+      globalPlayBtn.textContent = '⏸ Pause';
+      targetUnit.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  } else if (e.code === 'Space') {
+    e.preventDefault();
+    const currentUnit = units[currentIndex];
+    if (currentUnit) {
+      currentUnit.classList.toggle('active');
+    }
+  }
+});
 </script>
 </body>
 </html>
 """
-    full_html = html_head + html_tail
-    with open(output_html_path, "w", encoding="utf-8") as f:
-        f.write(full_html)
+    with open(output_html_path, 'w', encoding='utf-8') as f:
+        f.write(html_head + html_tail)
         
     print(f"Master multi-chapter interactive reader successfully compiled -> {output_html_path}")
-    return output_html_path
+
