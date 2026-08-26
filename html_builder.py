@@ -250,7 +250,8 @@ body {{
   font-size: 0.8rem;
   font-family: var(--font-sans);
 }}
-.diagnostics-mode .diagnostics-panel {{ display: block; }}
+.diagnostics-mode #diagnosticsPanel {{ display: block; }}
+#drawerTips.open {{ display: block; }}
 .status-verified {{ color: #166534; background: #dcfce7; }}
 .status-review-required {{ color: #92400e; background: #fef3c7; }}
 
@@ -302,7 +303,7 @@ body {{
 }}
 
 .control-drawer.open {{
-  max-height: 240px;
+  max-height: 360px;
   padding: 12px 16px 14px;
 }}
 
@@ -564,6 +565,7 @@ audio {{
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
           <button class="icon-btn" onclick="adjustFontSize(1)">A+</button>
           <button class="icon-btn" onclick="toggleTheme()">📜 Theme</button>
+          <button class="icon-btn" id="tipsToggleBtn" onclick="toggleTips()">Tips</button>
         </div>
         <div class="drawer-group">
           <button class="icon-btn" id="diagnosticsBtn" onclick="toggleDiagnostics()">Diagnostics</button>
@@ -577,6 +579,10 @@ audio {{
       <div class="diagnostics-panel" id="diagnosticsPanel">
         <strong>System diagnostics</strong><br>
         Status labels are hidden from the reading flow. Open the chapter menu to inspect processing status.
+      </div>
+      <div class="diagnostics-panel" id="drawerTips">
+        <strong>Reading &amp; Listening Tips</strong><br>
+        Click English to play and show the translation. Click the translation to hide it. Use arrow keys to move between sentences. Press Space to show or hide the current translation.
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
     </div>
@@ -792,6 +798,11 @@ function adjustFontSize(delta) {
   localStorage.setItem('book_font_size', currentFontSizeRem);
 }
 
+function toggleTips() {
+  const tips = document.getElementById('drawerTips');
+  if (tips) tips.classList.toggle('open');
+}
+
 const savedFontSize = localStorage.getItem('book_font_size');
 if (savedFontSize) {
   currentFontSizeRem = parseFloat(savedFontSize);
@@ -823,6 +834,40 @@ function handleInspectPanelClick(event, id) {
     el.classList.remove('active');
   }
 }
+
+function toggleCurrentTranslation() {
+  const activeSection = document.querySelector('.chapter-section.active');
+  if (!activeSection) return;
+  const units = Array.from(activeSection.querySelectorAll('.sentence-unit'));
+  let unit = units.find(u => u.id === currentPlayingId);
+  if (!unit) unit = units[0];
+  if (unit) unit.classList.toggle('active');
+}
+
+window.addEventListener('keydown', (event) => {
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+  const activeSection = document.querySelector('.chapter-section.active');
+  if (!activeSection) return;
+  const units = Array.from(activeSection.querySelectorAll('.sentence-unit'));
+  if (!units.length) return;
+  let index = units.findIndex(u => u.id === currentPlayingId);
+  if (index < 0) {
+    index = units.findIndex(u => audio.currentTime >= parseFloat(u.dataset.start) && audio.currentTime <= parseFloat(u.dataset.end));
+    if (index < 0) index = 0;
+  }
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    const next = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? Math.max(0, index - 1) : Math.min(units.length - 1, index + 1);
+    const target = units[next];
+    audio.currentTime = parseFloat(target.dataset.start);
+    audio.play();
+    target.classList.add('active');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else if (event.key === ' ' || event.code === 'Space') {
+    event.preventDefault();
+    toggleCurrentTranslation();
+  }
+});
 
 function toggleGlobalPlay() {
   if (audio.paused) {
