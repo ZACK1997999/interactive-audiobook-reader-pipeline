@@ -1,6 +1,7 @@
 import json
 import re
 import difflib
+import argparse
 
 def norm_word(w):
     return re.sub(r'[^a-zA-Z0-9]', '', w).lower()
@@ -45,6 +46,7 @@ def robust_monotonic_align(acoustic_words, sentences):
     
     # 2. Second pass: interpolate and fine-match all sentences between anchors
     aligned = []
+    prev_raw_st = 0.0
     
     # Add boundary anchors
     anchor_indices = sorted(anchors.keys())
@@ -97,7 +99,7 @@ def robust_monotonic_align(acoustic_words, sentences):
             c_end = max(c_start, min(total_ac - 1, c_end))
             seg_last_ac = c_start
             
-            raw_st = acoustic_words[c_start]["start"]
+            raw_st = max(prev_raw_st, acoustic_words[c_start]["start"])
             raw_et = max(raw_st + 0.8, acoustic_words[c_end]["end"])
             
             # Word spans
@@ -115,6 +117,7 @@ def robust_monotonic_align(acoustic_words, sentences):
                     we = round(raw_st + w_frac_next * (raw_et - raw_st), 2)
                 word_spans.append({"word": rw, "start": ws, "end": we})
                 
+            prev_raw_st = raw_st
             aligned.append({
                 **s,
                 "start": round(max(0.0, raw_st - 0.15), 2),
@@ -147,25 +150,20 @@ def robust_monotonic_align(acoustic_words, sentences):
     
     return aligned
 
-# Test on Chapter 3
-with open("/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein/audio/range_ch03_acoustic_words.json") as f:
-    ac = json.load(f)["words"]
-with open("/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein/range_ch03_full_analysis.json") as f:
-    sents = json.load(f)
+def main():
+    parser = argparse.ArgumentParser(description="Run the robust aligner against local JSON fixtures.")
+    parser.add_argument("acoustic_json")
+    parser.add_argument("sentences_json")
+    args = parser.parse_args()
+    with open(args.acoustic_json, encoding="utf-8") as f:
+        ac = json.load(f)["words"]
+    with open(args.sentences_json, encoding="utf-8") as f:
+        sents = json.load(f)
+    res = robust_monotonic_align(ac, sents)
+    issues = sum(b["start"] < a["start"] for a, b in zip(res, res[1:]))
+    print(f"Total aligned sentences: {len(res)}")
+    print(f"Audit completed: {issues} non-monotonic issues!")
+    return 1 if issues else 0
 
-res = robust_monotonic_align(ac, sents)
-print(f"Total aligned sentences in Ch 3: {len(res)}")
-print(f"First sentence: {res[0]['start']}s - {res[0]['end']}s")
-print(f"Middle sentence (s-200): {res[200]['start']}s - {res[200]['end']}s ({res[200]['text'][:40]}...)")
-print(f"Sentence (s-300): {res[300]['start']}s - {res[300]['end']}s ({res[300]['text'][:40]}...)")
-print(f"Last sentence: {res[-1]['start']}s - {res[-1]['end']}s ({res[-1]['text'][:40]}...)")
-
-# Audit monotonicity
-issues = 0
-prev = -1
-for s in res:
-    if s['start'] < prev:
-        print(f"Non-monotonic in {s['id']}: prev={prev}, cur={s['start']}")
-        issues += 1
-    prev = s['start']
-print(f"Audit completed: {issues} non-monotonic issues!")
+if __name__ == "__main__":
+    raise SystemExit(main())
