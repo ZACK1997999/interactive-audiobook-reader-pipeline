@@ -399,15 +399,14 @@ body {{
 
 .w {{
   display: inline;
-  padding: 1px 0;
   border-radius: 3px;
-  transition: background 0.1s ease, color 0.1s ease;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }}
 
 .w.active-word {{
   background-color: var(--word-highlight-bg) !important;
   color: var(--word-highlight-text) !important;
-  font-weight: 600;
   border-radius: 3px;
 }}
 
