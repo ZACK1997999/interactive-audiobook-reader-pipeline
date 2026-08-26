@@ -39,6 +39,8 @@ def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-co
             })
             
     output_data = {
+        "model": model_name,
+        "word_timestamps": True,
         "segments": segments_list,
         "words": words_list
     }

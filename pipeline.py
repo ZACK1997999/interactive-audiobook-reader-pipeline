@@ -13,12 +13,15 @@ import sys
 import argparse
 import json
 import glob
+import re
+from pathlib import Path
 
 PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(PIPELINE_DIR)
 
 from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
+from validate_outputs import validate
 
 def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None, force_realign=False):
     """
@@ -58,8 +61,6 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         
         # Determine chapter number
         ch_num = 0
-        digits = [int(s) for s in re.findall(r'\d+', prefix)] if 're' in globals() else []
-        import re
         digits = [int(s) for s in re.findall(r'\d+', prefix)]
         if digits:
             ch_num = digits[0]
@@ -112,6 +113,10 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             
     print(f"\nDiscovered {len(aligned_configs)} / {len(canon_files)} ready aligned chapters for {book_title}")
     if aligned_configs:
+        report_path = os.path.join(book_dir, "reader_validation_report.json")
+        if validate(Path(book_dir), Path(report_path)) != 0:
+            print(f"Release blocked. See {report_path}")
+            return 0, master_html_path
         print("--> Compiling Master Multi-Chapter Interactive Reader...")
         build_master_reader(
             book_title=book_title,
@@ -133,13 +138,15 @@ def main():
     parser.add_argument("--realign", action="store_true", help="Force re-alignment across all chapters")
     
     args = parser.parse_args()
-    auto_discover_and_build(
+    ready_count, _ = auto_discover_and_build(
         book_dir=args.book_dir,
         book_title=args.title,
         book_subtitle=args.subtitle,
         book_author=args.author,
         force_realign=args.realign
     )
+    if ready_count == 0:
+        raise SystemExit(1)
 
 if __name__ == "__main__":
     main()

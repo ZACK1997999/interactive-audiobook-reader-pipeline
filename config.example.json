@@ -1,0 +1,10 @@
+{
+  "book_title": "Example Book",
+  "book_subtitle": "Example Subtitle",
+  "book_author": "Example Author",
+  "book_slug": "example_book",
+  "book_dir": "/path/to/private/book-output",
+  "epub": "/path/to/private/book.epub",
+  "audio_dir": "/path/to/private/audio",
+  "acoustic_model": "mlx-community/whisper-large-v3-turbo"
+}

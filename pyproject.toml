@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "immersive-audiobook-reader-pipeline"
+version = "0.4.0"
+description = "A configurable EPUB/audiobook alignment and immersive reader pipeline"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+acoustic = ["mlx-whisper"]
+
+[project.scripts]
+reader-pipeline = "pipeline:main"
+reader-validate = "validate_outputs:main"
+
+[tool.setuptools]
+py-modules = [
+  "acoustic_whisper",
+  "config",
+  "deploy_pages",
+  "dynamic_aligner",
+  "extract_epub",
+  "html_builder",
+  "pipeline",
+  "run_manifest",
+  "validate_outputs"
+]

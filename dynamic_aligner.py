@@ -102,25 +102,46 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             matched_sentences[s_idx] = {
                 "start": round(st, 2),
                 "end": round(max(st + 0.3, et), 2),
+                "raw_start": round(st, 2),
+                "raw_end": round(max(st + 0.3, et), 2),
                 "has_audio_match": True,
-                "word_spans": word_spans
+                "word_spans": word_spans,
+                "word_start": w_start,
+                "matched_token_count": best_score,
+                "source_token_count": len(clean_s),
+                "match_ratio": round(best_score / max(1, len(clean_s)), 3),
+                "alignment_method": "global_cluster_match",
+                "fallback_used": False
             }
             
     # Build final aligned list preserving 100% of sentences
     aligned_results = []
     last_known_t = 0.0
+    last_word_start = -1
     
     for s_idx, s in enumerate(sentences):
         raw_words = s["text"].split()
         if s_idx in matched_sentences:
             ms = matched_sentences[s_idx]
+            non_monotonic = ms["word_start"] < last_word_start
             last_known_t = ms["end"]
+            last_word_start = max(last_word_start, ms["word_start"])
             aligned_results.append({
                 **s,
+                "source_text": s.get("source_text", s.get("text", "")),
                 "start": ms["start"],
                 "end": ms["end"],
+                "raw_start": ms["raw_start"],
+                "raw_end": ms["raw_end"],
                 "has_audio_match": True,
-                "word_spans": ms["word_spans"]
+                "word_spans": ms["word_spans"],
+                "matched_token_count": ms["matched_token_count"],
+                "source_token_count": ms["source_token_count"],
+                "match_ratio": ms["match_ratio"],
+                "alignment_method": ms["alignment_method"],
+                "fallback_used": False,
+                "alignment_status": "review-required" if non_monotonic else "validated",
+                "alignment_reason": "global_match_out_of_order" if non_monotonic else None
             })
         else:
             # Sentence without standalone acoustic match (e.g. unread heading label)
@@ -128,17 +149,28 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             word_spans = [{"word": rw, "start": bookmark_t, "end": bookmark_t} for rw in raw_words]
             aligned_results.append({
                 **s,
+                "source_text": s.get("source_text", s.get("text", "")),
                 "start": bookmark_t,
                 "end": bookmark_t,
+                "raw_start": bookmark_t,
+                "raw_end": bookmark_t,
                 "has_audio_match": False,
-                "word_spans": word_spans
+                "word_spans": word_spans,
+                "matched_token_count": 0,
+                "source_token_count": len(tokenize_clean(s.get("text", ""))),
+                "match_ratio": 0.0,
+                "alignment_method": "unmatched",
+                "fallback_used": True,
+                "alignment_status": "not-applicable" if s.get("is_heading") else "review-required",
+                "alignment_reason": "no_sufficient_global_match"
             })
             
     with open(aligned_out_path, "w", encoding="utf-8") as f:
         json.dump(aligned_results, f, ensure_ascii=False, indent=2)
         
     matched_count = len(matched_sentences)
-    print(f"[{aligned_out_path}] Aligned 100% of sentences: {len(aligned_results)} / {len(sentences)} (Audio matches: {matched_count} / {len(sentences)} -> {matched_count/len(sentences):.1%})")
+    validated_count = sum(item.get("alignment_status") == "validated" for item in aligned_results)
+    print(f"[{aligned_out_path}] Produced {len(aligned_results)} records; {matched_count} audio matches, {validated_count} validated, {len(aligned_results) - validated_count} requiring review or non-applicable.")
     return aligned_results
 
 if __name__ == "__main__":

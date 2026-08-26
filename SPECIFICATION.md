@@ -35,3 +35,11 @@ Each book directory strictly maintains the following standard schema:
 │   └── [book_prefix]_ch{00..N}_acoustic_words.json   # MLX Whisper word timestamps
 └── [Book_Title]_Interactive_Reader.html               # Standalone multi-chapter reader
 ```
+
+## 4. Release and Reproducibility Contract
+
+The reader is compiled only after a separate release gate passes. Every aligned record must include matched-token count, source-token count, match ratio, alignment method, fallback status, alignment status, and reason. Global matching may handle narrated sidebars, but an out-of-order, weak, missing, or estimated match is `review-required`, never silently validated.
+
+Gemini owns linguistic analysis and must emit the branch-local JSON contract in `LINGUISTIC_ANALYSIS_PROMPT.md`. Local scripts own extraction, acoustic transcription, alignment, validation, and compilation. Deployment is explicit and validation-gated.
+
+No reusable script may contain a book-specific absolute path. Book-specific exceptions belong in configuration or an isolated adapter. Private books, audiobook files, credentials, and generated copyrighted readers stay outside the public repository.
