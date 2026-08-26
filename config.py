@@ -2,9 +2,10 @@
 
 from pathlib import Path
 import os
+from typing import Optional
 
 
-def path_arg(value: str | None, env_name: str, *, required: bool = True) -> Path | None:
+def path_arg(value: Optional[str], env_name: str, *, required: bool = True) -> Optional[Path]:
     """Resolve a CLI value, then an environment variable, without machine defaults."""
     raw = value or os.environ.get(env_name)
     if not raw:
