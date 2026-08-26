@@ -20,6 +20,14 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`dynamic_aligner.py`](dynamic_aligner.py) | **Alignment Engine**: Global matching with evidence-bearing word spans. |
 | [`html_builder.py`](html_builder.py) | **Static HTML Compiler**: Builds the multi-chapter interactive reader. |
 | [`audio_resolver.py`](audio_resolver.py) | **Audio Contract**: Resolves exactly one explicit chapter audio candidate. |
+| [`models.py`](models.py) | **Stable Internal Contracts**: Backend-neutral domain models introduced in Phase 1. |
+| [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
+| [`alignment_backend.py`](alignment_backend.py) | **Alignment Boundary**: Exposes the current aligner behind a replaceable backend interface. |
+| [`chapter_locator.py`](chapter_locator.py) | **Chapter Locator**: Fuzzy, evidence-bearing chapter-start discovery. |
+| [`acoustic_backend.py`](acoustic_backend.py) | **Acoustic Boundary**: Replaceable MLX/WhisperX-compatible interface. |
+| [`whisperx_backend.py`](whisperx_backend.py) | **Optional WhisperX Backend**: Forced-alignment timestamps without affecting the default MLX install. |
+| [`CONTRACTS.md`](CONTRACTS.md) | **Contract Reference**: Object responsibilities and compatibility boundary. |
+| [`PHASE_0_BASELINE.md`](PHASE_0_BASELINE.md) | **Refactor Baseline**: Starting commit and scope of the synthetic contract fixtures. |
 | [`validate_outputs.py`](validate_outputs.py) | **Release Gate**: Blocks release for missing, weak, or inconsistent data. |
 | [`LINGUISTIC_ANALYSIS_PROMPT.md`](LINGUISTIC_ANALYSIS_PROMPT.md) | **Gemini contract**: Context-first language analysis using the existing JSON schema. |
 | [`REPRODUCE.md`](REPRODUCE.md) | **Reproduction guide**: Setup, contracts, privacy boundary, and handoff. |
@@ -45,6 +53,15 @@ For Apple Silicon acoustic extraction:
 python3 -m pip install -e '.[acoustic]'
 ```
 
+WhisperX is an optional alternative backend:
+
+```bash
+python3 -m pip install -e '.[whisperx]'
+```
+
+The default workflow remains MLX Whisper. WhisperX is exposed through the same
+`AcousticBackend` contract and is tested without downloading a model.
+
 This installs `reader-pipeline` and `reader-validate`. Deployment is never part of the normal processing command.
 
 ### 1-Line AI Instruction (Recommended)
@@ -66,3 +83,6 @@ reader-pipeline --book-dir "/path/to/book-directory" --title "Book Title" --auth
 The command aligns only ready chapter pairs, runs the release validator, and compiles the reader
 only when validation passes. A blocked validation exits non-zero. Use `reader-validate` to inspect
 the same gate without compiling HTML. Deployment remains a separate, explicit operation.
+
+The current release command consumes prepared artifacts. The extraction, acoustic, and alignment
+backends will be placed behind the stable interfaces in later refactor phases.

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "s-1",
+    "text": "Alpha begins.",
+    "source_text": "Alpha begins.",
+    "start": 0.0,
+    "end": 0.7,
+    "raw_start": 0.0,
+    "raw_end": 0.7,
+    "has_audio_match": true,
+    "word_spans": [
+      {"word": "Alpha", "start": 0.0, "end": 0.3},
+      {"word": "begins.", "start": 0.3, "end": 0.7}
+    ],
+    "matched_token_count": 2,
+    "source_token_count": 2,
+    "match_ratio": 1.0,
+    "alignment_method": "fixture",
+    "fallback_used": false,
+    "alignment_status": "validated",
+    "alignment_reason": null
+  },
+  {
+    "id": "s-2",
+    "text": "Beta follows.",
+    "source_text": "Beta follows.",
+    "start": 0.9,
+    "end": 1.6,
+    "raw_start": 0.9,
+    "raw_end": 1.6,
+    "has_audio_match": true,
+    "word_spans": [
+      {"word": "Beta", "start": 0.9, "end": 1.2},
+      {"word": "follows.", "start": 1.2, "end": 1.6}
+    ],
+    "matched_token_count": 2,
+    "source_token_count": 2,
+    "match_ratio": 1.0,
+    "alignment_method": "fixture",
+    "fallback_used": false,
+    "alignment_status": "validated",
+    "alignment_reason": null
+  }
+]

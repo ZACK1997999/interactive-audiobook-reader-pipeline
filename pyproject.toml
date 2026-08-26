@@ -11,6 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 acoustic = ["mlx-whisper"]
+whisperx = ["whisperx"]
 
 [project.scripts]
 reader-pipeline = "pipeline:main"
@@ -19,7 +20,14 @@ reader-validate = "validate_outputs:main"
 [tool.setuptools]
 py-modules = [
   "acoustic_whisper",
+  "models",
   "audio_resolver",
+  "alignment_backend",
+  "contract_adapters",
+  "chapter_resolver",
+  "chapter_locator",
+  "acoustic_backend",
+  "whisperx_backend",
   "config",
   "dynamic_aligner",
   "extract_epub",

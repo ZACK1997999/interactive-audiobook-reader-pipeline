@@ -7,7 +7,14 @@ setup(
     description="A configurable EPUB/audiobook alignment and immersive reader pipeline",
     py_modules=[
         "acoustic_whisper",
+        "models",
         "audio_resolver",
+        "alignment_backend",
+        "contract_adapters",
+        "chapter_resolver",
+        "chapter_locator",
+        "acoustic_backend",
+        "whisperx_backend",
         "config",
         "dynamic_aligner",
         "extract_epub",
@@ -18,7 +25,7 @@ setup(
     ],
     python_requires=">=3.9",
     install_requires=[],
-    extras_require={"acoustic": ["mlx-whisper"]},
+    extras_require={"acoustic": ["mlx-whisper"], "whisperx": ["whisperx"]},
     entry_points={
         "console_scripts": [
             "reader-pipeline=pipeline:main",
