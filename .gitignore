@@ -1,0 +1,24 @@
+# Local inputs and generated/copyright-sensitive book assets
+*.epub
+*.mobi
+*.mp3
+*.m4b
+*.wav
+audio/
+books/
+outputs/
+generated/
+data/
+
+# Local Python/runtime files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+
+# Machine-specific configuration
+local_config.*
+config.local.*
+
