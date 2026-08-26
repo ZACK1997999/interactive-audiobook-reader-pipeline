@@ -6,7 +6,8 @@ processing run remain in the repository as historical reference, but are not
 installed as package commands and must not be used to publish a reader without
 the release gate.
 
-Examples include the 48 Laws watcher/adapter and older Range batch helpers.
+The `archive/legacy-experiments/` directory contains the 48 Laws watcher/adapter, older Range
+batch helpers, the hardcoded deployment helper, and the old private-fixture diagnostic.
 When the same behavior is needed for a second book, extract the behavior into
 the generic pipeline and add a regression fixture; do not copy the script and
 hardcode a new book path.

@@ -19,7 +19,6 @@ The **Interactive Audiobook Reader Pipeline** is a fully automated, Apple Books-
 
 ### Pillar III: Universal End-to-End Automation (`pipeline.py`)
 - **Auto-Discovery**: Given any book directory in Obsidian (e.g. `/Range - David Epstein`, `/The 48 Laws of Power - Robert Greene`), the pipeline auto-infers titles, authors, chapter counts, and track files.
-- **Continuous Daemon Watcher (`auto_sync_watcher.py`)**: Continuously monitors local MLX Whisper output on Apple Silicon and automatically recompiles the Master Reader as each chapter completes.
 
 ---
 

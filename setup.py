@@ -8,7 +8,6 @@ setup(
     py_modules=[
         "acoustic_whisper",
         "config",
-        "deploy_pages",
         "dynamic_aligner",
         "extract_epub",
         "html_builder",
