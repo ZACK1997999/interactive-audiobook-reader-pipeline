@@ -40,6 +40,7 @@ def main():
     analysis_json = os.path.join(book_dir, f"range_ch{cnum_str}_full_analysis.json")
     local_audio = os.path.join(book_dir, "audio", f"chapter_{cnum_str}.mp3")
     master_html = os.path.join(book_dir, "Range_Interactive_Reader.html")
+    discovered_chapters = []
     
     print("=" * 60)
     print("Interactive Audiobook Reader Industrial Pipeline")
