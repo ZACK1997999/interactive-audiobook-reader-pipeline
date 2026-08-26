@@ -36,3 +36,8 @@ reader-validate /path/to/private/book-output --report /path/to/private/book-outp
 ```
 
 Any warning or error blocks release. Weak, estimated, missing, or out-of-order alignment is never silently accepted.
+
+Out-of-order matches are valid only when the alignment evidence is strong and the record has
+been explicitly changed from `review-required` to `reviewed` with reason
+`global_match_out_of_order`. This separates canonical reading order from physical audio order
+without allowing automatic global matching to bypass review.

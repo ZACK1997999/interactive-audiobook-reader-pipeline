@@ -14,6 +14,61 @@ def tokenize_clean(text):
     cleaned = re.sub(r'[\—\–\-\/\_\:\;\,\.\?\!\"\“\”\(\)\[\]\{\}\'\‘\’\`]', ' ', str(text).lower())
     return [w for w in cleaned.split() if w]
 
+
+def _source_tokens_with_words(text):
+    """Return normalized source tokens together with their original-word indexes."""
+    raw_words = str(text).split()
+    tokens, word_indexes = [], []
+    for word_index, raw_word in enumerate(raw_words):
+        for token in tokenize_clean(raw_word):
+            tokens.append(token)
+            word_indexes.append(word_index)
+    return tokens, word_indexes
+
+
+def _short_sentence_candidate_count(source_tokens, audio_tokens):
+    """Count exact positions for short sentences, where a partial hit is unsafe."""
+    width = len(source_tokens)
+    if width > 2:
+        return None
+    return sum(
+        audio_tokens[index:index + width] == source_tokens
+        for index in range(max(0, len(audio_tokens) - width + 1))
+    )
+
+
+def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_words, st, et):
+    """Map source words to matched acoustic words, interpolating only true gaps."""
+    mapped_by_word = {index: [] for index in range(len(raw_words))}
+    for source_index, audio_token_index in source_to_audio.items():
+        if source_index < len(source_word_indexes):
+            mapped_by_word[source_word_indexes[source_index]].append(audio_token_index)
+
+    mapped_word_ranges = {}
+    for word_index, token_indexes in mapped_by_word.items():
+        if token_indexes:
+            mapped_word_ranges[word_index] = (min(token_indexes), max(token_indexes))
+
+    spans = []
+    for word_index, raw_word in enumerate(raw_words):
+        if word_index in mapped_word_ranges:
+            start_token, end_token = mapped_word_ranges[word_index]
+            start_word = acoustic_words[start_token]
+            end_word = acoustic_words[end_token]
+            ws = max(st, float(start_word["start"]))
+            we = max(ws, float(end_word["end"]))
+        else:
+            previous = [mapped_word_ranges[i][0] for i in range(word_index) if i in mapped_word_ranges]
+            following = [mapped_word_ranges[i][0] for i in range(word_index + 1, len(raw_words)) if i in mapped_word_ranges]
+            if previous and following:
+                ws = st + (et - st) * (word_index / max(1, len(raw_words)))
+                we = st + (et - st) * ((word_index + 1) / max(1, len(raw_words)))
+            else:
+                ws = st + (et - st) * (word_index / max(1, len(raw_words)))
+                we = st + (et - st) * ((word_index + 1) / max(1, len(raw_words)))
+        spans.append({"word": raw_word, "start": round(ws, 2), "end": round(max(ws, we), 2)})
+    return spans
+
 def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_out_path):
     with open(analysis_json_path, "r", encoding="utf-8") as f:
         sentences = json.load(f)
@@ -41,7 +96,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
     matched_sentences = {}
     
     for s_idx, s in enumerate(sentences):
-        clean_s = tokenize_clean(s["text"])
+        clean_s, source_word_indexes = _source_tokens_with_words(s["text"])
         if len(clean_s) == 0:
             continue
             
@@ -68,10 +123,15 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         min_thresh = 1 if len(clean_s) <= 2 else 2 if len(clean_s) <= 4 else 3
         ratio_thresh = 0.35 if len(clean_s) >= 4 else 0.5
         
-        if best_cluster and best_score >= min_thresh and (best_score / len(clean_s)) >= ratio_thresh:
+        short_candidates = _short_sentence_candidate_count(clean_s, ac_tokens)
+        short_is_ambiguous = len(clean_s) <= 2 and (
+            short_candidates != 1 or best_score < len(clean_s)
+        )
+
+        if best_cluster and not short_is_ambiguous and best_score >= min_thresh and (best_score / len(clean_s)) >= ratio_thresh:
             first_b = best_cluster[0]
             last_b = best_cluster[-1]
-            t_start = max(0, min(len(ac_tokens) - 1, first_b.b - first_b.a))
+            t_start = max(0, min(len(ac_tokens) - 1, first_b.b))
             t_end = max(t_start, min(len(ac_tokens) - 1, last_b.b + last_b.size + (len(clean_s) - last_b.a - last_b.size) - 1))
             
             w_start = ac_map[t_start]
@@ -79,25 +139,14 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             st = acoustic_words[w_start]["start"]
             et = acoustic_words[w_end]["end"]
             
-            # Map word spans inside sentence to acoustic words
             raw_words = s["text"].split()
-            word_spans = []
-            span_count = len(raw_words)
-            for w_i, rw in enumerate(raw_words):
-                target_ac = min(total_ac - 1, w_start + w_i)
-                if target_ac <= w_end:
-                    ws = max(st, acoustic_words[target_ac]["start"])
-                    we = max(ws, acoustic_words[target_ac]["end"])
-                else:
-                    frac = w_i / max(1, span_count)
-                    frac_next = (w_i + 1) / max(1, span_count)
-                    ws = st + frac * (et - st)
-                    we = st + frac_next * (et - st)
-                word_spans.append({
-                    "word": rw,
-                    "start": round(ws, 2),
-                    "end": round(we, 2)
-                })
+            source_to_audio = {}
+            for block in best_cluster:
+                for offset in range(block.size):
+                    source_to_audio[block.a + offset] = ac_map[block.b + offset]
+            word_spans = _build_word_spans(
+                raw_words, source_word_indexes, source_to_audio, acoustic_words, st, et
+            )
                 
             matched_sentences[s_idx] = {
                 "start": round(st, 2),
@@ -162,7 +211,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_method": "unmatched",
                 "fallback_used": True,
                 "alignment_status": "not-applicable" if s.get("is_heading") else "review-required",
-                "alignment_reason": "no_sufficient_global_match"
+                "alignment_reason": "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match"
             })
             
     with open(aligned_out_path, "w", encoding="utf-8") as f:

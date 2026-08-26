@@ -8,13 +8,12 @@ from pathlib import Path
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 
 def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
-    """Accept the canonical name and common exported audiobook filename variants."""
+    """Accept only the canonical name or filenames that explicitly encode the chapter."""
     canonical = audio_dir / f"chapter_{number:02d}.mp3"
     if canonical.exists():
         return True
-    candidates = list(audio_dir.glob(f"*{number:02d}*.mp3"))
-    if number:
-        candidates.extend(audio_dir.glob(f"*{number}*.mp3"))
+    pattern = re.compile(rf"(?<!\d)(?:chapter|ch)[ _-]*0*{number}(?!\d)", re.IGNORECASE)
+    candidates = [path for path in audio_dir.glob("*.mp3") if pattern.search(path.name)]
     return bool(candidates)
 
 
@@ -82,11 +81,18 @@ def validate(book_dir: Path, report_path=None):
         for item in aligned_data:
             item_id = item.get("id", "<unknown>")
             is_heading = item.get("is_heading", False)
+            approved_non_monotonic = (
+                item.get("alignment_status") == "reviewed"
+                and item.get("alignment_reason") == "global_match_out_of_order"
+                and item.get("has_audio_match") is True
+                and not item.get("fallback_used")
+                and float(item.get("match_ratio", 0.0)) >= 0.5
+            )
             if not is_heading and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
             start = float(item.get("raw_start", item.get("start", -1)))
             end = float(item.get("raw_end", item.get("end", -1)))
-            if start < previous_start:
+            if start < previous_start and not approved_non_monotonic:
                 errors.append(f"{label} {item_id}: non-monotonic raw start")
             if end < start:
                 errors.append(f"{label} {item_id}: end precedes start")
@@ -98,7 +104,7 @@ def validate(book_dir: Path, report_path=None):
             previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
-            if not is_heading and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") != "validated" or matched < 1 or ratio < 0.5):
+            if not is_heading and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or ratio < 0.5):
                 review_ids.append(item_id)
         record["review_required_records"] = len(review_ids)
         if review_ids:

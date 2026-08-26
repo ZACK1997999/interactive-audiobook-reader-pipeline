@@ -35,3 +35,16 @@ class AlignmentEvidenceTests(unittest.TestCase):
         result = self.run_alignment(words, [{"id": "s-1", "text": "first exact phrase"}, {"id": "s-2", "text": "second exact phrase"}])
         self.assertEqual(result[0]["alignment_status"], "validated")
         self.assertEqual(result[1]["alignment_reason"], "global_match_out_of_order")
+
+    def test_word_spans_follow_matching_blocks_after_audio_insertion(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("alpha extra beta gamma".split())]
+        result = self.run_alignment(words, [{"id": "s-1", "text": "alpha beta gamma"}])[0]
+        self.assertEqual([span["word"] for span in result["word_spans"]], ["alpha", "beta", "gamma"])
+        self.assertEqual(result["word_spans"][1]["start"], 2)
+        self.assertEqual(result["word_spans"][2]["start"], 3)
+
+    def test_ambiguous_short_sentence_requires_review(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("No. Maybe no.".split())]
+        item = self.run_alignment(words, [{"id": "s-1", "text": "No."}])[0]
+        self.assertEqual(item["alignment_status"], "review-required")
+        self.assertEqual(item["alignment_reason"], "ambiguous_short_sentence")
