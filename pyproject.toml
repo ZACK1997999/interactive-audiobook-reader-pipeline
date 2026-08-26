@@ -19,6 +19,7 @@ reader-validate = "validate_outputs:main"
 [tool.setuptools]
 py-modules = [
   "acoustic_whisper",
+  "models",
   "audio_resolver",
   "config",
   "dynamic_aligner",

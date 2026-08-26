@@ -1,0 +1,10 @@
+{
+  "model": "fixture",
+  "word_timestamps": true,
+  "words": [
+    {"word": "Alpha", "start": 0.0, "end": 0.3},
+    {"word": "begins", "start": 0.3, "end": 0.7},
+    {"word": "Beta", "start": 0.9, "end": 1.2},
+    {"word": "follows", "start": 1.2, "end": 1.6}
+  ]
+}

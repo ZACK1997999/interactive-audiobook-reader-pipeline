@@ -2,6 +2,10 @@
 
 This repository contains reusable code and contracts only. Keep copyrighted EPUBs, audiobooks, generated readers, private notes, and credentials outside Git.
 
+The backend-neutral domain models and synthetic Phase 0 fixtures are documented in
+[`CONTRACTS.md`](CONTRACTS.md). They freeze the internal vocabulary without changing the current
+JSON files or reader output.
+
 ## Roles
 
 - Gemini reads `LINGUISTIC_ANALYSIS_PROMPT.md` and produces one `*_full_analysis.json` per chapter.

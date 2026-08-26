@@ -7,6 +7,7 @@ setup(
     description="A configurable EPUB/audiobook alignment and immersive reader pipeline",
     py_modules=[
         "acoustic_whisper",
+        "models",
         "audio_resolver",
         "config",
         "dynamic_aligner",
