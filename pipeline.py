@@ -8,7 +8,7 @@ import sys
 import argparse
 import json
 
-from extract_epub import extract_chapter_from_epub
+from extract_epub import extract_chapter_from_epub, extract_chapter_from_text
 from acoustic_whisper import run_mlx_acoustic_extraction
 from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description="Interactive Audiobook Reader Industrial Pipeline")
     parser.add_argument("--book-dir", help="Output directory (or set READER_BOOK_DIR)")
     parser.add_argument("--epub", help="Path to source EPUB file")
+    parser.add_argument("--text", help="Path to a plain-text chapter source")
     parser.add_argument("--internal-path", help="Internal XHTML path inside EPUB (e.g. OEBPS/xhtml/11_CHAPTER_3_When_Less_o.xhtml)")
     parser.add_argument("--audio-source", help="Source MP3 track path")
     parser.add_argument("--chapter-num", type=int, help="Chapter number (e.g. 3)")
@@ -49,7 +50,10 @@ def main():
     print("=" * 60)
     
     # 1. Extraction
-    if args.action in ["extract", "all"] and args.epub and args.internal_path:
+    if args.action in ["extract", "all"] and args.text:
+        print("\n[Step 1] Extracting canonical sentences from text...")
+        extract_chapter_from_text(args.text, canon_json)
+    elif args.action in ["extract", "all"] and args.epub and args.internal_path:
         print("\n[Step 1] Extracting canonical sentences from EPUB...")
         extract_chapter_from_epub(args.epub, args.internal_path, canon_json)
         
