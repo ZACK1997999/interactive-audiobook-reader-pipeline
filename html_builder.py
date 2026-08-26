@@ -7,6 +7,17 @@ import json
 import html
 import os
 import sys
+import re
+
+_MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
+
+def chapter_status(sentences):
+    """Return a conservative UI status; uncertain data must be visible."""
+    if any(not s.get('word_spans') for s in sentences if not s.get('is_heading')):
+        return 'review-required'
+    if any(_MULTI_BOUNDARY.search(s.get('text', '')) for s in sentences if not s.get('is_heading')):
+        return 'review-required'
+    return 'verified'
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path):
     """
@@ -24,7 +35,8 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
             'num': c['num'],
             'title': c['title'],
             'audio': c['audio'],
-            'sentences': sents
+            'sentences': sents,
+            'status': c.get('status') or chapter_status(sents)
         })
         
     first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_01.mp3"
@@ -219,6 +231,16 @@ body {{
   font-weight: 700;
   letter-spacing: 0.5px;
 }}
+.status-tag {{
+  margin-left: auto;
+  font-size: 0.68rem;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}}
+.status-verified {{ color: #166534; background: #dcfce7; }}
+.status-review-required {{ color: #92400e; background: #fef3c7; }}
 
 .nav-actions {{
   display: flex;
@@ -510,6 +532,7 @@ audio {{
         html_head += f"""        <div class="chapter-item{active_cls}" id="menu-ch-{cnum}" onclick="switchChapter({cnum})">
           <span class="chapter-item-tag">Chapter {cnum}</span>
           <span>{html.escape(ctitle)}</span>
+          <span class="status-tag status-{ch['status']}">{html.escape(ch['status'])}</span>
         </div>\n"""
 
     html_head += f"""      </div>
@@ -557,7 +580,7 @@ audio {{
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
       <h1 class="book-title">CHAPTER {cnum}<br>{html.escape(ctitle)}</h1>
-      <div class="book-author">{html.escape(book_author)}</div>
+      <div class="book-author">{html.escape(book_author)} · <span class="status-tag status-{ch['status']}">{html.escape(ch['status'])}</span></div>
     </header>
 
     <div class="book-content">
