@@ -10,8 +10,21 @@ import re
 import difflib
 import sys
 
+COMMON_CONTRACTIONS = {
+    "can't": "cannot", "couldn't": "could not", "didn't": "did not",
+    "doesn't": "does not", "don't": "do not", "hadn't": "had not",
+    "hasn't": "has not", "haven't": "have not", "isn't": "is not",
+    "it's": "it is", "let's": "let us", "mustn't": "must not",
+    "shouldn't": "should not", "that's": "that is", "there's": "there is",
+    "they're": "they are", "wasn't": "was not", "weren't": "were not",
+    "won't": "will not", "wouldn't": "would not", "you're": "you are",
+}
+
 def tokenize_clean(text):
-    cleaned = re.sub(r'[\—\–\-\/\_\:\;\,\.\?\!\"\“\”\(\)\[\]\{\}\'\‘\’\`]', ' ', str(text).lower())
+    normalized = str(text).lower().replace("’", "'")
+    for contraction, expansion in COMMON_CONTRACTIONS.items():
+        normalized = re.sub(rf"(?<![a-z]){re.escape(contraction.strip())}(?![a-z])", expansion, normalized)
+    cleaned = re.sub(r'[\—\–\-\/\_\:\;\,\.\?\!\"\“\”\(\)\[\]\{\}\'\‘\’\`]', ' ', normalized)
     return [w for w in cleaned.split() if w]
 
 

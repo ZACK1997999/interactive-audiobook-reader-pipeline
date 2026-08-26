@@ -48,3 +48,10 @@ class AlignmentEvidenceTests(unittest.TestCase):
         item = self.run_alignment(words, [{"id": "s-1", "text": "No."}])[0]
         self.assertEqual(item["alignment_status"], "review-required")
         self.assertEqual(item["alignment_reason"], "ambiguous_short_sentence")
+
+    def test_common_contraction_matches_spoken_expansion(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("I did not know".split())]
+        item = self.run_alignment(words, [{"id": "s-1", "text": "I didn't know."}])[0]
+        self.assertEqual(item["alignment_status"], "validated")
+        self.assertEqual(item["matched_token_count"], 4)
+        self.assertEqual(item["word_spans"][1]["start"], 1)
