@@ -37,7 +37,7 @@ Each book directory strictly maintains the following standard schema:
 
 ## 4. Release and Reproducibility Contract
 
-The reader is compiled only after a separate release gate passes. Every aligned record must include matched-token count, source-token count, match ratio, alignment method, fallback status, alignment status, and reason. Global matching may handle narrated sidebars, but an out-of-order, weak, missing, or estimated match is `review-required`, never silently validated.
+The reader is compiled only after a separate release gate passes. Every aligned record must include matched-token count, source-token count, match ratio, alignment method, fallback status, alignment status, and reason. Global matching may handle narrated sidebars, but an out-of-order, weak, missing, or estimated match is `review-required`, never silently validated. A human or trusted review step may change a genuinely evidenced out-of-order record to `reviewed`; only that explicit status can waive the physical-audio-order check.
 
 Gemini owns linguistic analysis and must emit the branch-local JSON contract in `LINGUISTIC_ANALYSIS_PROMPT.md`. Local scripts own extraction, acoustic transcription, alignment, validation, and compilation. Deployment is explicit and validation-gated.
 

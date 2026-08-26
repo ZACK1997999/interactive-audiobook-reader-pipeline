@@ -23,6 +23,20 @@ from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
 from validate_outputs import validate
 
+
+def _find_chapter_audio(audio_dir, chapter_number):
+    """Find only filenames that explicitly encode this chapter number."""
+    canonical = os.path.join(audio_dir, f"chapter_{chapter_number:02d}.mp3")
+    if os.path.exists(canonical):
+        return canonical
+    candidates = []
+    chapter_pattern = re.compile(r"(?<!\d)(?:chapter|ch)[ _-]*(\d+)(?!\d)", re.IGNORECASE)
+    for candidate in glob.glob(os.path.join(audio_dir, "*.mp3")):
+        match = chapter_pattern.search(os.path.basename(candidate))
+        if match and int(match.group(1)) == chapter_number:
+            candidates.append(candidate)
+    return candidates[0] if len(candidates) == 1 else None
+
 def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None, force_realign=False):
     """
     Universally auto-discovers all chapters in a book directory,
@@ -70,13 +84,8 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         acoustic_path = os.path.join(audio_dir, f"{prefix}_acoustic_words.json")
         
         # Audio file matching
-        audio_file_rel = f"./audio/chapter_{ch_num:02d}.mp3"
-        audio_file_abs = os.path.join(audio_dir, f"chapter_{ch_num:02d}.mp3")
-        if not os.path.exists(audio_file_abs):
-            # Try alternate names
-            alt_audios = glob.glob(os.path.join(audio_dir, f"*{ch_num:02d}*.mp3")) + glob.glob(os.path.join(audio_dir, f"*{ch_num}*.mp3"))
-            if alt_audios:
-                audio_file_rel = f"./audio/{os.path.basename(alt_audios[0])}"
+        audio_file = _find_chapter_audio(audio_dir, ch_num)
+        audio_file_rel = f"./audio/{os.path.basename(audio_file)}" if audio_file else f"./audio/chapter_{ch_num:02d}.mp3"
                 
         has_analysis = os.path.exists(analysis_path) and os.path.getsize(analysis_path) > 1000
         has_acoustic = os.path.exists(acoustic_path) and os.path.getsize(acoustic_path) > 1000
