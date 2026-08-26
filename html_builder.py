@@ -240,7 +240,17 @@ body {{
   letter-spacing: .2px;
   display: none;
 }}
-.edit-mode .status-tag {{ display: inline-block; }}
+.diagnostics-mode .status-tag {{ display: inline-block; }}
+.diagnostics-panel {{
+  display: none;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-sub);
+  font-size: 0.8rem;
+  font-family: var(--font-sans);
+}}
+.diagnostics-mode .diagnostics-panel {{ display: block; }}
 .status-verified {{ color: #166534; background: #dcfce7; }}
 .status-review-required {{ color: #92400e; background: #fef3c7; }}
 
@@ -556,13 +566,17 @@ audio {{
           <button class="icon-btn" onclick="toggleTheme()">📜 Theme</button>
         </div>
         <div class="drawer-group">
-          <button class="icon-btn" id="editModeBtn" onclick="toggleEditMode()">Edit mode</button>
+          <button class="icon-btn" id="diagnosticsBtn" onclick="toggleDiagnostics()">Diagnostics</button>
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; display: flex; align-items: center; gap: 4px; color: var(--text-sub);">
             <input type="checkbox" id="autoScrollCheck" checked onchange="toggleAutoScroll(this.checked)"> Auto-scroll
           </label>
         </div>
+      </div>
+      <div class="diagnostics-panel" id="diagnosticsPanel">
+        <strong>System diagnostics</strong><br>
+        Status labels are hidden from the reading flow. Open the chapter menu to inspect processing status.
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
     </div>
@@ -663,26 +677,26 @@ const controlDrawer = document.getElementById('controlDrawer');
 const drawerToggleBtn = document.getElementById('drawerToggleBtn');
 const chapterDropdown = document.getElementById('chapterDropdown');
 const currentChapterLabel = document.getElementById('currentChapterLabel');
-const editModeBtn = document.getElementById('editModeBtn');
+const diagnosticsBtn = document.getElementById('diagnosticsBtn');
 
 let activeChapterNum = parseInt(localStorage.getItem('book_active_ch') || '1', 10);
 let autoScrollEnabled = localStorage.getItem('book_autoscroll') !== 'false';
 let currentPlayingId = null;
 let currentActiveWordEl = null;
-let editModeEnabled = localStorage.getItem('book_edit_mode') === 'true';
+let diagnosticsEnabled = localStorage.getItem('book_diagnostics') === 'true';
 
-function applyEditMode() {
-  document.body.classList.toggle('edit-mode', editModeEnabled);
-  editModeBtn.textContent = editModeEnabled ? 'Exit edit mode' : 'Edit mode';
+function applyDiagnostics() {
+  document.body.classList.toggle('diagnostics-mode', diagnosticsEnabled);
+  diagnosticsBtn.textContent = diagnosticsEnabled ? 'Hide diagnostics' : 'Diagnostics';
 }
 
-function toggleEditMode() {
-  editModeEnabled = !editModeEnabled;
-  localStorage.setItem('book_edit_mode', editModeEnabled);
-  applyEditMode();
+function toggleDiagnostics() {
+  diagnosticsEnabled = !diagnosticsEnabled;
+  localStorage.setItem('book_diagnostics', diagnosticsEnabled);
+  applyDiagnostics();
 }
 
-applyEditMode();
+applyDiagnostics();
 
 document.getElementById('autoScrollCheck').checked = autoScrollEnabled;
 
