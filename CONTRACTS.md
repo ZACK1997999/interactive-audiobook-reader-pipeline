@@ -37,6 +37,16 @@ Storyteller-inspired fuzzy locator. It returns `resolved`, `ambiguous`, or
 `no-match` plus candidate evidence; it is not yet wired into automatic release
 selection.
 
+Phase 5 adds [`acoustic_backend.py`](acoustic_backend.py) and the optional
+[`whisperx_backend.py`](whisperx_backend.py). Both acoustic backends expose
+`AcousticWord`; WhisperX is lazy-loaded and remains opt-in through the
+`whisperx` package extra.
+
+Phase 5 adds [`acoustic_backend.py`](acoustic_backend.py) and the optional
+[`whisperx_backend.py`](whisperx_backend.py). Both acoustic backends expose
+`AcousticWord`; WhisperX is lazy-loaded and remains opt-in through the
+`whisperx` package extra.
+
 ## Phase 0 fixtures
 
 The synthetic fixtures in `fixtures/phase0/` describe one tiny book and are used

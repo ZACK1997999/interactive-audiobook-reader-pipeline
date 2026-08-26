@@ -24,6 +24,8 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
 | [`alignment_backend.py`](alignment_backend.py) | **Alignment Boundary**: Exposes the current aligner behind a replaceable backend interface. |
 | [`chapter_locator.py`](chapter_locator.py) | **Chapter Locator**: Fuzzy, evidence-bearing chapter-start discovery. |
+| [`acoustic_backend.py`](acoustic_backend.py) | **Acoustic Boundary**: Replaceable MLX/WhisperX-compatible interface. |
+| [`whisperx_backend.py`](whisperx_backend.py) | **Optional WhisperX Backend**: Forced-alignment timestamps without affecting the default MLX install. |
 | [`CONTRACTS.md`](CONTRACTS.md) | **Contract Reference**: Object responsibilities and compatibility boundary. |
 | [`PHASE_0_BASELINE.md`](PHASE_0_BASELINE.md) | **Refactor Baseline**: Starting commit and scope of the synthetic contract fixtures. |
 | [`validate_outputs.py`](validate_outputs.py) | **Release Gate**: Blocks release for missing, weak, or inconsistent data. |
@@ -50,6 +52,15 @@ For Apple Silicon acoustic extraction:
 ```bash
 python3 -m pip install -e '.[acoustic]'
 ```
+
+WhisperX is an optional alternative backend:
+
+```bash
+python3 -m pip install -e '.[whisperx]'
+```
+
+The default workflow remains MLX Whisper. WhisperX is exposed through the same
+`AcousticBackend` contract and is tested without downloading a model.
 
 This installs `reader-pipeline` and `reader-validate`. Deployment is never part of the normal processing command.
 
