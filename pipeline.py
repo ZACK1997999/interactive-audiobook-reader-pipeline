@@ -16,7 +16,7 @@ from deploy_pages import deploy_to_audible
 
 def main():
     parser = argparse.ArgumentParser(description="Interactive Audiobook Reader Industrial Pipeline")
-    parser.add_argument("--book-dir", help="Book storage directory in Obsidian", default="/Users/lindy/Vault/MyObsidian/English/Sentence Analysis/Range - David Epstein")
+    parser.add_argument("--book-dir", help="Output directory (or set READER_BOOK_DIR)")
     parser.add_argument("--epub", help="Path to source EPUB file")
     parser.add_argument("--internal-path", help="Internal XHTML path inside EPUB (e.g. OEBPS/xhtml/11_CHAPTER_3_When_Less_o.xhtml)")
     parser.add_argument("--audio-source", help="Source MP3 track path")
@@ -26,7 +26,8 @@ def main():
     
     args = parser.parse_args()
     
-    book_dir = args.book_dir
+    from config import path_arg
+    book_dir = str(path_arg(args.book_dir, "READER_BOOK_DIR"))
     os.makedirs(book_dir, exist_ok=True)
     os.makedirs(os.path.join(book_dir, "audio"), exist_ok=True)
     
