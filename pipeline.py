@@ -302,6 +302,7 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
             output_html_path=master_html_path,
             release_token=release_token,
             release_report_path=report_path,
+            book_id=public_book_id,
         )
         smoke = smoke_check_html(Path(master_html_path), expected_chapters=len(aligned_configs))
         if smoke["status"] != "passed":

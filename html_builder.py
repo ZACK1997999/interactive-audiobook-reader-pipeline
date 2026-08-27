@@ -6,12 +6,13 @@ Description: Compiles Multi-Chapter Apple Books-grade Interactive Readers with t
 import json
 import html
 import os
+import re
 import sys
 from artifact_io import atomic_write_text
 from release_token import ReleaseToken, verify_release_token
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path,
-                        *, release_token: ReleaseToken, release_report_path):
+                        *, release_token: ReleaseToken, release_report_path, book_id=None):
     """
     chapters_config: list of dicts with:
       - 'num': int (e.g. 1, 2)
@@ -19,6 +20,12 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
       - 'audio': str (e.g. './audio/chapter_01.mp3')
       - 'aligned_json': str (path to aligned sentences JSON)
     """
+    if book_id is None or not str(book_id).strip():
+        slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(book_title).strip().lower()).strip("_")
+        book_id = slug or "default"
+    else:
+        book_id = str(book_id).strip()
+
     output_html_path = os.path.abspath(output_html_path)
     book_dir = os.path.dirname(output_html_path)
     verify_release_token(release_token, book_dir, release_report_path)
@@ -657,10 +664,14 @@ body {{
   </section>
 """
 
-    html_tail = """
+    book_id_json = json.dumps(book_id)
+    html_tail = f"""
 </main>
 
 <script>
+window.__BOOK_ID__ = {book_id_json};
+const STORAGE_PREFIX = 'reader_' + (window.__BOOK_ID__ || 'default') + '_';
+""" + """
 const audio = document.getElementById('audioTrack');
 const globalPlayBtn = document.getElementById('globalPlayBtn');
 const controlDrawer = document.getElementById('controlDrawer');
@@ -668,8 +679,8 @@ const drawerToggleBtn = document.getElementById('drawerToggleBtn');
 const chapterDropdown = document.getElementById('chapterDropdown');
 const currentChapterLabel = document.getElementById('currentChapterLabel');
 
-let activeChapterNum = parseInt(localStorage.getItem('book_active_ch') || '0', 10);
-let autoScrollEnabled = localStorage.getItem('book_autoscroll') !== 'false';
+let activeChapterNum = parseInt(localStorage.getItem(STORAGE_PREFIX + 'active_ch') || '0', 10);
+let autoScrollEnabled = localStorage.getItem(STORAGE_PREFIX + 'autoscroll') !== 'false';
 let currentPlayingId = null;
 let currentActiveWordEl = null;
 
@@ -677,7 +688,7 @@ document.getElementById('autoScrollCheck').checked = autoScrollEnabled;
 
 function toggleAutoScroll(enabled) {
   autoScrollEnabled = enabled;
-  localStorage.setItem('book_autoscroll', enabled);
+  localStorage.setItem(STORAGE_PREFIX + 'autoscroll', enabled);
 }
 
 // Chapter Switching
@@ -694,7 +705,7 @@ function closeDropdowns(event) {
 
 function switchChapter(chNum) {
   activeChapterNum = chNum;
-  localStorage.setItem('book_active_ch', chNum);
+  localStorage.setItem(STORAGE_PREFIX + 'active_ch', chNum);
   currentChapterLabel.textContent = chNum === 0 ? 'Preface' : 'Ch. ' + chNum;
   
   document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('active'));
@@ -732,15 +743,15 @@ function toggleDrawer() {
   if (isOpen) {
     controlDrawer.classList.remove('open');
     drawerToggleBtn.innerHTML = '⚙️ Menu';
-    localStorage.setItem('book_drawer_open', 'false');
+    localStorage.setItem(STORAGE_PREFIX + 'drawer_open', 'false');
   } else {
     controlDrawer.classList.add('open');
     drawerToggleBtn.innerHTML = '✕ Close';
-    localStorage.setItem('book_drawer_open', 'true');
+    localStorage.setItem(STORAGE_PREFIX + 'drawer_open', 'true');
   }
 }
 
-const savedDrawerState = localStorage.getItem('book_drawer_open');
+const savedDrawerState = localStorage.getItem(STORAGE_PREFIX + 'drawer_open');
 if (savedDrawerState === 'true') {
   controlDrawer.classList.add('open');
   drawerToggleBtn.innerHTML = '✕ Close';
@@ -751,10 +762,10 @@ let currentThemeIndex = 0;
 function toggleTheme() {
   currentThemeIndex = (currentThemeIndex + 1) % themes.length;
   document.documentElement.setAttribute('data-theme', themes[currentThemeIndex]);
-  localStorage.setItem('book_theme', themes[currentThemeIndex]);
+  localStorage.setItem(STORAGE_PREFIX + 'theme', themes[currentThemeIndex]);
 }
 
-const savedTheme = localStorage.getItem('book_theme');
+const savedTheme = localStorage.getItem(STORAGE_PREFIX + 'theme');
 if (savedTheme) {
   document.documentElement.setAttribute('data-theme', savedTheme);
   currentThemeIndex = themes.indexOf(savedTheme);
@@ -764,10 +775,10 @@ let currentFontSizeRem = 1.20;
 function adjustFontSize(delta) {
   currentFontSizeRem = Math.max(0.95, Math.min(1.8, currentFontSizeRem + delta * 0.08));
   document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
-  localStorage.setItem('book_font_size', currentFontSizeRem);
+  localStorage.setItem(STORAGE_PREFIX + 'font_size', currentFontSizeRem);
 }
 
-const savedFontSize = localStorage.getItem('book_font_size');
+const savedFontSize = localStorage.getItem(STORAGE_PREFIX + 'font_size');
 if (savedFontSize) {
   currentFontSizeRem = parseFloat(savedFontSize);
   document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
@@ -787,7 +798,7 @@ function handleSentenceClick(event, id, start, end, hasMatch) {
   const el = document.getElementById(id);
   if (!el) return;
   
-  localStorage.setItem('book_last_sentence_c' + activeChapterNum, id);
+  localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
   if (start > 0 || hasMatch) {
     audio.currentTime = start;
     audio.play();
@@ -841,7 +852,7 @@ function syncPlayback() {
       if (activeUnit) {
         if (activeUnit.id !== currentPlayingId) {
           currentPlayingId = activeUnit.id;
-          localStorage.setItem('book_last_sentence_c' + activeChapterNum, activeUnit.id);
+          localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, activeUnit.id);
           
           if (autoScrollEnabled) {
             const rect = activeUnit.getBoundingClientRect();

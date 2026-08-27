@@ -8,9 +8,12 @@ must produce contract files. Publication is intentionally not a stage here.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -25,6 +28,27 @@ from chapter_resolver import discover_chapters
 
 SCHEMA_VERSION = 1
 STAGES = ("intake", "linguistic", "acoustic", "alignment", "validation", "compile")
+
+
+@contextlib.contextmanager
+def _book_run_lock(book_dir: Path):
+    """Prevent concurrent orchestrator executions against the same book directory."""
+    lock_path = Path(book_dir) / ".orchestrator.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError) as exc:
+            raise RuntimeError(f"Another orchestrator run is active for {book_dir}") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _natural_sort_key(p: Path):
+    match = re.search(r"\d+", p.stem)
+    return int(match.group()) if match else p.stem
 
 
 def sha256(path: Path) -> str:
@@ -146,7 +170,9 @@ def _artifact_ready(stage: str, row: Dict) -> bool:
             if not isinstance(generated.get("vocab"), list):
                 return False
         return True
-    return isinstance(data, list) and bool(data)
+    if stage == "acoustic":
+        return (isinstance(data, dict) and bool(data.get("words"))) or (isinstance(data, list) and bool(data))
+    return False
 
 
 def _run_worker(stage: str, row: Dict, command: List[str], state: Dict, state_path: Path, max_attempts: int) -> bool:
@@ -191,59 +217,69 @@ def _run_worker(stage: str, row: Dict, command: List[str], state: Dict, state_pa
 
 def run(book_dir: Path, state_path: Path, linguistic_command: Optional[str] = None,
         acoustic_command: Optional[str] = None, max_attempts: int = 2, dry_run: bool = False) -> int:
-    book_dir = book_dir.resolve(); state_path = state_path.resolve()
-    state = _load_state(state_path)
-    state["book_dir"] = str(book_dir)
-    state["status"] = "running"
-    rows = _chapter_rows(book_dir)
-    if not rows:
-        state["status"] = "blocked"
-        _event(state, "blocked", stage="intake", reason="no canonical chapter artifacts")
+    book_dir = Path(book_dir).resolve()
+    state_path = Path(state_path).resolve()
+    with _book_run_lock(book_dir):
+        state = _load_state(state_path)
+        state["book_dir"] = str(book_dir)
+        state["status"] = "running"
+        rows = _chapter_rows(book_dir)
+        if not rows:
+            state["status"] = "blocked"
+            _event(state, "blocked", stage="intake", reason="no canonical chapter artifacts")
+            _save_state(state_path, state)
+            return 1
+        audio_candidates = sorted((book_dir / "audio").glob("*.mp3"), key=_natural_sort_key)
+        for idx, row in enumerate(rows):
+            if not row.get("audio") and len(audio_candidates) == len(rows):
+                row["audio"] = str(audio_candidates[idx].resolve())
+        _attach_audio_mapping(book_dir, rows)
+        _set_chapters(state, rows)
+        state["current_stage"] = "intake"
+        state["intake"] = {"chapters": len(rows), "canonical_records": sum(len(json.loads(Path(r["canonical"]).read_text())) for r in rows)}
+        _event(state, "intake_passed", chapters=len(rows))
         _save_state(state_path, state)
-        return 1
-    for row in rows:
-        audio_candidates = sorted((book_dir / "audio").glob("*.mp3"))
-        if not row.get("audio") and len(audio_candidates) == len(rows):
-            row["audio"] = str(audio_candidates[row["chapter"]].resolve())
-    _attach_audio_mapping(book_dir, rows)
-    _set_chapters(state, rows)
-    state["current_stage"] = "intake"
-    state["intake"] = {"chapters": len(rows), "canonical_records": sum(len(json.loads(Path(r["canonical"]).read_text())) for r in rows)}
-    _event(state, "intake_passed", chapters=len(rows))
-    _save_state(state_path, state)
-    if dry_run:
-        state["status"] = "dry_run_passed"; state["current_stage"] = None; _save_state(state_path, state); return 0
+        if dry_run:
+            state["status"] = "dry_run_passed"
+            state["current_stage"] = None
+            _save_state(state_path, state)
+            return 0
 
-    for stage, raw_command in (("linguistic", linguistic_command), ("acoustic", acoustic_command)):
-        state["current_stage"] = stage
-        command = _worker_command(raw_command)
-        for row in rows:
-            output = Path(row["analysis"] if stage == "linguistic" else row["acoustic"])
-            if _artifact_ready(stage, row):
-                state["chapters"][str(row["chapter"])] ["status"] = f"{stage}_passed"
-                continue
-            if output.is_file() and output.stat().st_size > 0:
-                state["chapters"][str(row["chapter"])] ["failures"].append({
-                    "stage": stage,
-                    "reason": "existing artifact failed contract validation",
-                })
-                _event(state, "invalid_existing_artifact", stage=stage, chapter=row["chapter"])
-            if not command:
-                state["chapters"][str(row["chapter"])] ["failures"].append({"stage": stage, "reason": "worker command not configured"})
-                state["chapters"][str(row["chapter"])] ["status"] = f"{stage}_blocked"
-                _event(state, "blocked", stage=stage, chapter=row["chapter"], reason="worker command not configured")
+        for stage, raw_command in (("linguistic", linguistic_command), ("acoustic", acoustic_command)):
+            state["current_stage"] = stage
+            command = _worker_command(raw_command)
+            for row in rows:
+                output = Path(row["analysis"] if stage == "linguistic" else row["acoustic"])
+                if _artifact_ready(stage, row):
+                    state["chapters"][str(row["chapter"])]["status"] = f"{stage}_passed"
+                    continue
+                if output.is_file() and output.stat().st_size > 0:
+                    state["chapters"][str(row["chapter"])]["failures"].append({
+                        "stage": stage,
+                        "reason": "existing artifact failed contract validation",
+                    })
+                    _event(state, "invalid_existing_artifact", stage=stage, chapter=row["chapter"])
+                if not command:
+                    state["chapters"][str(row["chapter"])]["failures"].append({"stage": stage, "reason": "worker command not configured"})
+                    state["chapters"][str(row["chapter"])]["status"] = f"{stage}_blocked"
+                    _event(state, "blocked", stage=stage, chapter=row["chapter"], reason="worker command not configured")
+                    _save_state(state_path, state)
+                    continue
+                _run_worker(stage, row, command, state, state_path, max_attempts)
+            if any(state["chapters"][str(r["chapter"])].get("status") in (f"{stage}_blocked", f"{stage}_failed") for r in rows):
+                state["status"] = "blocked"
                 _save_state(state_path, state)
-                continue
-            _run_worker(stage, row, command, state, state_path, max_attempts)
-        if any(state["chapters"][str(r["chapter"])].get("status") == f"{stage}_blocked" for r in rows):
-            state["status"] = "blocked"; _save_state(state_path, state); return 1
+                return 1
 
-    state["current_stage"] = "delegated_pipeline"
-    _event(state, "handoff", target="pipeline.py", reason="worker stages complete or externally prepared")
-    state["status"] = "ready_for_pipeline"
-    state["current_stage"] = None
-    _save_state(state_path, state)
-    return 0
+        state["current_stage"] = "delegated_pipeline"
+        _event(state, "handoff", target="pipeline.py", reason="worker stages complete or externally prepared")
+        state["status"] = "ready_for_pipeline"
+        state["current_stage"] = None
+        _save_state(state_path, state)
+        return 0
+
+
+run_orchestrator = run
 
 
 def main() -> int:
