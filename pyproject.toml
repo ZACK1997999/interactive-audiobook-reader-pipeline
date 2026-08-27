@@ -34,5 +34,6 @@ py-modules = [
   "html_builder",
   "pipeline",
   "run_manifest",
+  "artifact_io",
   "validate_outputs"
 ]

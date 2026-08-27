@@ -11,6 +11,7 @@ import argparse
 import json
 import glob
 import re
+import hashlib
 from pathlib import Path
 
 PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +22,31 @@ from html_builder import build_master_reader
 from validate_outputs import validate
 from chapter_resolver import discover_chapters
 from audio_resolver import resolve_chapter_audio
+from run_manifest import update_manifest
+
+
+def _file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _analysis_ready(path, canonical_path):
+    """Require complete, non-empty analysis before alignment can begin."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            analysis = json.load(handle)
+        with open(canonical_path, encoding="utf-8") as handle:
+            canonical = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return False
+    return (
+        isinstance(analysis, list)
+        and len(analysis) == len(canonical)
+        and all(isinstance(item.get("trans"), str) and item.get("trans", "").strip() for item in analysis)
+    )
 
 
 def _find_chapter_audio(audio_dir, chapter_number):
@@ -59,6 +85,7 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         return 0, master_html_path
         
     aligned_configs = []
+    manifest_chapters = []
     
     for artifact in chapter_artifacts:
         c_path = str(artifact.canonical_path)
@@ -73,8 +100,18 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         audio_file = _find_chapter_audio(audio_dir, ch_num)
         audio_file_rel = f"./audio/{os.path.basename(audio_file)}" if audio_file else f"./audio/chapter_{ch_num:02d}.mp3"
                 
-        has_analysis = os.path.exists(analysis_path) and os.path.getsize(analysis_path) > 1000
+        has_analysis = os.path.exists(analysis_path) and _analysis_ready(analysis_path, c_path)
         has_acoustic = os.path.exists(acoustic_path) and os.path.getsize(acoustic_path) > 1000
+        manifest_chapters.append({
+            "chapter": ch_num,
+            "status": "ready" if has_analysis and has_acoustic else "blocked",
+            "canonical": os.path.relpath(c_path, book_dir),
+            "analysis": os.path.relpath(analysis_path, book_dir),
+            "acoustic": os.path.relpath(acoustic_path, book_dir),
+            "aligned": os.path.relpath(aligned_path, book_dir),
+            "analysis_sha256": _file_sha256(analysis_path) if os.path.exists(analysis_path) else None,
+            "acoustic_sha256": _file_sha256(acoustic_path) if os.path.exists(acoustic_path) else None,
+        })
         
         if has_analysis and has_acoustic:
             needs_align = force_realign or not os.path.exists(aligned_path)
@@ -106,10 +143,22 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
                 "aligned_json": aligned_path
             })
             
+    for entry in manifest_chapters:
+        aligned_file = Path(book_dir) / entry["aligned"]
+        if aligned_file.exists():
+            entry["aligned_sha256"] = _file_sha256(aligned_file)
+            if entry["status"] == "ready":
+                entry["status"] = "aligned"
+    update_manifest(book_dir, manifest_chapters, status="prepared")
     print(f"\nDiscovered {len(aligned_configs)} / {len(chapter_artifacts)} ready aligned chapters for {book_title}")
+    if not aligned_configs:
+        update_manifest(book_dir, manifest_chapters, status="blocked")
+        print("Release blocked: no chapters have complete analysis and acoustic artifacts.")
+        return 0, master_html_path
     if aligned_configs:
         report_path = os.path.join(book_dir, "reader_validation_report.json")
         if validate(Path(book_dir), Path(report_path)) != 0:
+            update_manifest(book_dir, manifest_chapters, status="blocked")
             print(f"Release blocked. See {report_path}")
             return 0, master_html_path
         print("--> Compiling Master Multi-Chapter Interactive Reader...")
@@ -120,6 +169,7 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             chapters_config=aligned_configs,
             output_html_path=master_html_path
         )
+        update_manifest(book_dir, manifest_chapters, status="released")
         print(f"Successfully generated/updated: {master_html_path}")
         
     return len(aligned_configs), master_html_path

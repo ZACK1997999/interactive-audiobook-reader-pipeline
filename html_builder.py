@@ -7,6 +7,7 @@ import json
 import html
 import os
 import sys
+from artifact_io import atomic_write_text
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path):
     """
@@ -949,8 +950,6 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 """
-    with open(output_html_path, 'w', encoding='utf-8') as f:
-        f.write(html_head + html_tail)
+    atomic_write_text(output_html_path, html_head + html_tail)
         
     print(f"Master multi-chapter interactive reader successfully compiled -> {output_html_path}")
-

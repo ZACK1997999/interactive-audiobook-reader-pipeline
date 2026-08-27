@@ -63,6 +63,9 @@ The default workflow remains MLX Whisper. WhisperX is exposed through the same
 `AcousticBackend` contract and is tested without downloading a model.
 
 This installs `reader-pipeline` and `reader-validate`. Deployment is never part of the normal processing command.
+Every generated JSON, manifest, validation report, and HTML file is written atomically. The
+pipeline records per-chapter state and hashes in `reader_run_manifest.json` and refuses to compile
+when any required analysis, alignment, or review gate fails.
 
 ### 1-Line AI Instruction (Recommended)
 Simply say:

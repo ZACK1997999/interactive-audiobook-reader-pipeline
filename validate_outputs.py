@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from audio_resolver import resolve_chapter_audio
+from artifact_io import atomic_write_json
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 
@@ -15,6 +16,14 @@ def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
 
 def validate(book_dir: Path, report_path=None):
     errors, warnings, chapters = [], [], []
+    manifest_entries = {}
+    manifest_path = book_dir / "reader_run_manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_entries = {item.get("chapter"): item for item in manifest.get("chapters", [])}
+        except (OSError, ValueError, TypeError):
+            errors.append("reader_run_manifest.json: invalid JSON")
     canonical_files = sorted(book_dir.glob("*_ch*_canonical_sentences.json"))
     if not canonical_files:
         errors.append("No canonical sentence files found")
@@ -44,8 +53,31 @@ def validate(book_dir: Path, report_path=None):
         else:
             try:
                 analysis_data = json.loads(analysis.read_text(encoding="utf-8"))
+                canonical_by_id = {item.get("id"): item for item in data}
+                if not isinstance(analysis_data, list):
+                    errors.append(f"{label}: analysis must be a JSON list")
+                    analysis_data = []
+                if len(analysis_data) != len(data):
+                    errors.append(f"{label}: analysis record count mismatch")
                 if [item.get("id") for item in analysis_data] != ids:
                     errors.append(f"{label}: analysis IDs/order differ from canonical source")
+                allowed_keys = {"id", "text", "trans", "vocab", "is_heading", "elem_idx", "tag"}
+                for item in analysis_data:
+                    item_id = item.get("id", "<unknown>")
+                    if not isinstance(item.get("trans"), str) or not item.get("trans", "").strip():
+                        errors.append(f"{label} {item_id}: missing or empty translation")
+                    if item.get("text") != canonical_by_id.get(item_id, {}).get("text"):
+                        errors.append(f"{label} {item_id}: analysis text differs from canonical source")
+                    vocab = item.get("vocab")
+                    if not isinstance(vocab, list) or len(vocab) > 3:
+                        errors.append(f"{label} {item_id}: malformed vocabulary list")
+                    else:
+                        for entry in vocab:
+                            if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) and entry.get(k).strip() for k in ("word", "pos", "def")):
+                                errors.append(f"{label} {item_id}: malformed vocabulary item")
+                    unexpected = set(item) - allowed_keys
+                    if unexpected:
+                        errors.append(f"{label} {item_id}: unexpected analysis fields ({', '.join(sorted(unexpected))})")
                 record["analysis_records"] = len(analysis_data)
             except Exception as exc:
                 errors.append(f"{analysis.name}: invalid JSON ({exc})")
@@ -58,6 +90,13 @@ def validate(book_dir: Path, report_path=None):
                 errors.append(f"{label}: ambiguous chapter audio candidates ({names})")
 
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
+        manifest_entry = manifest_entries.get(number, {})
+        expected_hash = manifest_entry.get("aligned_sha256")
+        if expected_hash and aligned.exists():
+            import hashlib
+            digest = hashlib.sha256(aligned.read_bytes()).hexdigest()
+            if digest != expected_hash:
+                errors.append(f"{label}: aligned artifact changed after manifest creation")
         if not aligned.exists():
             errors.append(f"{label}: aligned file missing")
             record["status"] = "not-aligned"
@@ -85,6 +124,8 @@ def validate(book_dir: Path, report_path=None):
             approved_non_monotonic = (
                 item.get("alignment_status") == "reviewed"
                 and item.get("alignment_reason") == "global_match_out_of_order"
+                and isinstance(item.get("review_evidence"), str)
+                and bool(item.get("review_evidence", "").strip())
                 and item.get("has_audio_match") is True
                 and not item.get("fallback_used")
                 and float(item.get("match_ratio", 0.0)) >= 0.5
@@ -119,8 +160,7 @@ def validate(book_dir: Path, report_path=None):
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if report_path:
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(output + "\n", encoding="utf-8")
+        atomic_write_json(report_path, result)
     return 0 if result["release_ready"] else 1
 
 

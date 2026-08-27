@@ -9,6 +9,7 @@ import json
 import re
 import difflib
 import sys
+from artifact_io import atomic_write_json
 
 COMMON_CONTRACTIONS = {
     "can't": "cannot", "couldn't": "could not", "didn't": "did not",
@@ -95,8 +96,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
     total_ac = len(acoustic_words)
     if total_ac == 0:
         print(f"Warning: No acoustic words in {acoustic_json_path}")
-        with open(aligned_out_path, "w", encoding="utf-8") as f:
-            json.dump(sentences, f, ensure_ascii=False, indent=2)
+        atomic_write_json(aligned_out_path, sentences)
         return sentences
         
     # Build token list and index mapping for audio
@@ -230,8 +230,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_reason": "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match"
             })
             
-    with open(aligned_out_path, "w", encoding="utf-8") as f:
-        json.dump(aligned_results, f, ensure_ascii=False, indent=2)
+    atomic_write_json(aligned_out_path, aligned_results)
         
     matched_count = len(matched_sentences)
     validated_count = sum(item.get("alignment_status") == "validated" for item in aligned_results)

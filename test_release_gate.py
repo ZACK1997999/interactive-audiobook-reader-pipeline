@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,7 +41,10 @@ class ReleaseGateTests(unittest.TestCase):
             root = Path(tmp)
             (root / "audio").mkdir()
             (root / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
-            sentences = [{"id": "s-1", "text": "first exact phrase"}, {"id": "s-2", "text": "second exact phrase"}]
+            sentences = [
+                {"id": "s-1", "text": "first exact phrase", "trans": "第一个准确短语", "vocab": []},
+                {"id": "s-2", "text": "second exact phrase", "trans": "第二个准确短语", "vocab": []},
+            ]
             analysis_path = root / "book_ch01_full_analysis.json"
             analysis_path.write_text(json.dumps(sentences), encoding="utf-8")
             (root / "book_ch01_canonical_sentences.json").write_text(json.dumps(sentences), encoding="utf-8")
@@ -55,8 +59,42 @@ class ReleaseGateTests(unittest.TestCase):
 
             aligned = json.loads(aligned_path.read_text(encoding="utf-8"))
             aligned[1]["alignment_status"] = "reviewed"
+            aligned[1]["review_evidence"] = "Verified against the acoustic word sequence."
             aligned_path.write_text(json.dumps(aligned), encoding="utf-8")
             self.assertEqual(validate(root), 0)
+
+    def test_empty_translation_blocks_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            analysis = root / "book_ch01_full_analysis.json"
+            data = json.loads(analysis.read_text(encoding="utf-8"))
+            data[0]["trans"] = ""
+            analysis.write_text(json.dumps(data), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+
+    def test_malformed_vocabulary_blocks_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            analysis = root / "book_ch01_full_analysis.json"
+            data = json.loads(analysis.read_text(encoding="utf-8"))
+            data[0]["vocab"] = [{"word": "only-word"}]
+            analysis.write_text(json.dumps(data), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+
+    def test_manifest_detects_post_alignment_edit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            digest = hashlib.sha256(aligned.read_bytes()).hexdigest()
+            (root / "reader_run_manifest.json").write_text(json.dumps({
+                "schema_version": 2,
+                "chapters": [{"chapter": 1, "aligned_sha256": digest}],
+            }), encoding="utf-8")
+            aligned.write_text(aligned.read_text() + "\n", encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
 
     def test_audio_fallback_matches_explicit_chapter_only(self):
         with tempfile.TemporaryDirectory() as tmp:

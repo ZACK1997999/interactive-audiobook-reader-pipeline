@@ -6,6 +6,7 @@ Description: Apple Silicon GPU-Accelerated MLX Whisper Word Timestamp Extractor.
 import json
 import time
 import sys
+from artifact_io import atomic_write_json
 
 def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-community/whisper-large-v3-turbo"):
     import mlx_whisper
@@ -45,8 +46,7 @@ def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-co
         "words": words_list
     }
     
-    with open(output_json_path, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(output_json_path, output_data)
         
     elapsed = round(time.time() - start_t, 2)
     print(f"Acoustic extraction complete in {elapsed}s! Total words extracted: {len(words_list)} -> {output_json_path}")

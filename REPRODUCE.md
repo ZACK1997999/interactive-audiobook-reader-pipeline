@@ -40,6 +40,10 @@ reader-validate /path/to/private/book-output --report /path/to/private/book-outp
 ```
 
 Any warning or error blocks release. Weak, estimated, missing, or out-of-order alignment is never silently accepted.
+Translations must be non-empty, vocabulary entries must contain `word`, `pos`, and `def`, and
+analysis must preserve canonical text and record order. Generated artifacts use atomic replacement;
+partial files are not treated as completed stages. `reader_run_manifest.json` records chapter state
+and input/output hashes for resumability and tamper detection.
 
 Out-of-order matches are valid only when the alignment evidence is strong and the record has
 been explicitly changed from `review-required` to `reviewed` with reason

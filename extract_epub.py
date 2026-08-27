@@ -7,6 +7,7 @@ import zipfile
 import re
 import json
 from html.parser import HTMLParser
+from artifact_io import atomic_write_json
 
 def split_into_atomic_sentences(text):
     abbr_map = {
@@ -138,8 +139,7 @@ def extract_chapter_from_epub(epub_path, chapter_internal_path, out_json_path):
                 })
                 s_idx += 1
                 
-    with open(out_json_path, 'w', encoding='utf-8') as f:
-        json.dump(canonical_items, f, ensure_ascii=False, indent=2)
+    atomic_write_json(out_json_path, canonical_items)
         
     print(f"Extracted {len(canonical_items)} canonical sentences from {chapter_internal_path} -> {out_json_path}")
     return canonical_items
