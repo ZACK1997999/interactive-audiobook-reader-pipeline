@@ -1,10 +1,8 @@
 """Manifest-driven R2 upload with environment-only credentials.
 
 Required environment variables:
-  CLOUDFLARE_R2_ACCOUNT_ID
-  CLOUDFLARE_R2_ACCESS_KEY_ID
-  CLOUDFLARE_R2_SECRET_ACCESS_KEY
-  CLOUDFLARE_R2_BUCKET
+  R2_ACCESS_KEY_ID
+  R2_SECRET_ACCESS_KEY
 """
 
 import argparse
@@ -13,12 +11,9 @@ import os
 from pathlib import Path
 
 
-ENV_NAMES = (
-    "CLOUDFLARE_R2_ACCOUNT_ID",
-    "CLOUDFLARE_R2_ACCESS_KEY_ID",
-    "CLOUDFLARE_R2_SECRET_ACCESS_KEY",
-    "CLOUDFLARE_R2_BUCKET",
-)
+ACCOUNT_ID = "0e3d13022383dca5cd8d30e077ecb593"
+BUCKET_NAME = "audible-audio"
+ENV_NAMES = ("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY")
 
 
 def _settings():
@@ -49,9 +44,9 @@ def upload_manifest(manifest_path: Path, dry_run: bool = False) -> int:
         raise RuntimeError("Install deployment support with: pip install -e '.[deployment]'") from exc
     client = boto3.client(
         "s3",
-        endpoint_url=f"https://{settings['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com",
-        aws_access_key_id=settings["CLOUDFLARE_R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=settings["CLOUDFLARE_R2_SECRET_ACCESS_KEY"],
+        endpoint_url=f"https://{ACCOUNT_ID}.r2.cloudflarestorage.com",
+        aws_access_key_id=settings["R2_ACCESS_KEY_ID"],
+        aws_secret_access_key=settings["R2_SECRET_ACCESS_KEY"],
         region_name="auto",
     )
     uploaded = 0
@@ -59,7 +54,7 @@ def upload_manifest(manifest_path: Path, dry_run: bool = False) -> int:
         source = Path(entry["source_path"])
         if not source.is_file():
             raise FileNotFoundError(source)
-        client.upload_file(str(source), settings["CLOUDFLARE_R2_BUCKET"], entry["object_key"], ExtraArgs={"ContentType": "audio/mpeg"})
+        client.upload_file(str(source), BUCKET_NAME, entry["object_key"], ExtraArgs={"ContentType": "audio/mpeg"})
         uploaded += 1
         print(f"uploaded {uploaded}/{len(entries)} {entry['object_key']}")
     return uploaded
