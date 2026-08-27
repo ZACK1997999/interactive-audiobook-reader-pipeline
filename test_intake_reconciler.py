@@ -1,0 +1,114 @@
+import json
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+from artifact_io import atomic_write_json
+from intake_reconciler import approve_plan, build_plan, parse_epub, verify_gate
+
+
+def _make_epub(path: Path) -> None:
+    container = """<?xml version='1.0'?>
+    <container xmlns='urn:oasis:names:tc:opendocument:xmlns:container'>
+      <rootfiles><rootfile full-path='EPUB/content.opf'/></rootfiles>
+    </container>"""
+    opf = """<package xmlns='http://www.idpf.org/2007/opf' version='3.0'>
+      <metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:title>Fixture</dc:title></metadata>
+      <manifest>
+        <item id='nav' href='nav.xhtml' media-type='application/xhtml+xml' properties='nav'/>
+        <item id='empty' href='empty.xhtml' media-type='application/xhtml+xml'/>
+        <item id='c1' href='c1.xhtml' media-type='application/xhtml+xml'/>
+        <item id='c2' href='c2.xhtml' media-type='application/xhtml+xml'/>
+        <item id='cover' href='cover.jpg' media-type='image/jpeg' properties='cover-image'/>
+      </manifest>
+      <spine><itemref idref='empty'/><itemref idref='c1'/><itemref idref='c2'/></spine>
+    </package>"""
+    nav = """<html xmlns='http://www.w3.org/1999/xhtml'><body><nav><ol>
+      <li><a href='c1.xhtml'>The Beginning</a></li><li><a href='c2.xhtml'>The Ending</a></li>
+    </ol></nav></body></html>"""
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("META-INF/container.xml", container)
+        zf.writestr("EPUB/content.opf", opf)
+        zf.writestr("EPUB/nav.xhtml", nav)
+        zf.writestr("EPUB/empty.xhtml", "<html><body><img src='x.jpg'/></body></html>")
+        zf.writestr("EPUB/c1.xhtml", "<html><body>The beginning opens with a red door and a quiet street.</body></html>")
+        zf.writestr("EPUB/c2.xhtml", "<html><body>The ending closes beside the blue sea under a silent moon.</body></html>")
+        zf.writestr("EPUB/cover.jpg", b"jpeg fixture")
+
+
+class IntakeReconcilerTests(unittest.TestCase):
+    def test_epub_spine_titles_empty_filter_and_cover(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            epub = root / "book.epub"
+            cover = root / "cover.jpg"
+            _make_epub(epub)
+            parsed = parse_epub(epub, cover)
+            self.assertEqual([ch["title"] for ch in parsed["chapters"]], ["The Beginning", "The Ending"])
+            self.assertEqual(cover.read_bytes(), b"jpeg fixture")
+
+    def test_hash_bound_approval_blocks_changed_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            epub = root / "book.epub"
+            audio = root / "audio"
+            audio.mkdir()
+            _make_epub(epub)
+            intro = audio / "001 intro.mp3"
+            chapter1 = audio / "002 chapter.mp3"
+            chapter2 = audio / "003 chapter.mp3"
+            for path in (intro, chapter1, chapter2):
+                path.write_bytes(path.name.encode())
+            probes = {
+                intro.name: {"head": "audible hopes you enjoy this program", "tail": ""},
+                chapter1.name: {"head": "the beginning opens with a red door and a quiet street", "tail": "the beginning opens with a red door and a quiet street"},
+                chapter2.name: {"head": "the ending closes beside the blue sea under a silent moon", "tail": "the ending closes beside the blue sea under a silent moon"},
+            }
+            plan = build_plan(epub, audio, probes, duration_probe=lambda _: 60.0, threshold=0.80)
+            self.assertEqual(plan["mappings"][0]["kind"], "skip_audio")
+            plan_path = root / "intake_plan.json"
+            atomic_write_json(plan_path, plan)
+            approve_plan(plan_path)
+            self.assertEqual(verify_gate(plan_path)["gate_status"], "approved")
+            chapter1.write_bytes(b"changed")
+            with self.assertRaisesRegex(RuntimeError, "missing or changed"):
+                verify_gate(plan_path)
+
+    def test_low_confidence_plan_cannot_be_approved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            epub = root / "book.epub"
+            audio = root / "audio"
+            audio.mkdir()
+            _make_epub(epub)
+            for number in (1, 2):
+                (audio / f"{number}.mp3").write_bytes(b"audio")
+            plan = build_plan(epub, audio, {"1.mp3": {"head": "unrelated"}, "2.mp3": {"head": "noise"}}, duration_probe=lambda _: 1.0)
+            path = root / "plan.json"
+            atomic_write_json(path, plan)
+            with self.assertRaisesRegex(RuntimeError, "confidence threshold"):
+                approve_plan(path)
+
+    def test_reconciler_supports_two_epub_chapters_in_one_audio_track(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            epub = root / "book.epub"
+            audio = root / "audio"
+            audio.mkdir()
+            _make_epub(epub)
+            combined = audio / "combined.mp3"
+            combined.write_bytes(b"combined")
+            probes = {combined.name: {
+                "head": "the beginning opens with a red door and a quiet street",
+                "tail": "the ending closes beside the blue sea under a silent moon",
+            }}
+            plan = build_plan(epub, audio, probes, duration_probe=lambda _: 120.0, threshold=0.90)
+            matches = [row for row in plan["mappings"] if row["kind"] == "match"]
+            self.assertEqual(matches[0]["chapter_indices"], [0, 1])
+            self.assertEqual(matches[0]["audio_indices"], [0])
+            self.assertGreaterEqual(matches[0]["confidence"], 0.90)
+
+
+if __name__ == "__main__":
+    unittest.main()

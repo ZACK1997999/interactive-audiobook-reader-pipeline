@@ -6,12 +6,13 @@ Description: Compiles Multi-Chapter Apple Books-grade Interactive Readers with t
 import json
 import html
 import os
+import re
 import sys
 from artifact_io import atomic_write_text
 from release_token import ReleaseToken, verify_release_token
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path,
-                        *, release_token: ReleaseToken, release_report_path):
+                        *, release_token: ReleaseToken, release_report_path, book_id=None):
     """
     chapters_config: list of dicts with:
       - 'num': int (e.g. 1, 2)
@@ -19,6 +20,12 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
       - 'audio': str (e.g. './audio/chapter_01.mp3')
       - 'aligned_json': str (path to aligned sentences JSON)
     """
+    if book_id is None or not str(book_id).strip():
+        slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(book_title).strip().lower()).strip("_")
+        book_id = slug or "default"
+    else:
+        book_id = str(book_id).strip()
+
     output_html_path = os.path.abspath(output_html_path)
     book_dir = os.path.dirname(output_html_path)
     verify_release_token(release_token, book_dir, release_report_path)
@@ -40,10 +47,13 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
             'num': c['num'],
             'title': c['title'],
             'audio': c['audio'],
+            'public_audio': c.get('public_audio'),
             'sentences': sents
         })
         
     first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_00.mp3"
+    first_ch_public_audio = loaded_chapters[0].get('public_audio') if loaded_chapters else None
+    first_ch_num = loaded_chapters[0]['num'] if loaded_chapters else 0
     
     html_head = f"""<!DOCTYPE html>
 <html lang="en" data-theme="sepia">
@@ -319,28 +329,70 @@ body {{
 .drawer-tips {{
   display: none;
   font-family: var(--font-sans);
-  font-size: 0.80rem;
-  color: var(--text-sub);
+  font-size: 0.82rem;
   background: var(--bg-page);
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 14px 18px;
+  border-radius: 10px;
   border: 1px solid var(--border);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.02);
 }}
 
 .drawer-tips.open {{
   display: block;
 }}
 
-.tips-grid {{
+.tips-columns {{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}}
+
+@media (max-width: 600px) {{
+  .tips-columns {{
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }}
+}}
+
+.tips-section {{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}}
+
+.tips-section-title {{
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+}}
+
+.tips-row {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  line-height: 1.4;
 }}
 
 .tips-key {{
+  display: inline-block;
+  font-family: var(--font-sans);
   font-weight: 600;
-  color: var(--accent);
-  margin-right: 4px;
+  font-size: 0.74rem;
+  color: var(--text-main);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  white-space: nowrap;
 }}
 
 /* Main Layout */
@@ -538,7 +590,7 @@ body {{
         cnum = ch["num"]
         ctitle = ch["title"]
         label = "Preface" if cnum == 0 else f"Chapter {cnum}"
-        active_cls = " active" if cnum == 0 else ""
+        active_cls = " active" if cnum == first_ch_num else ""
         html_head += f"""        <div class="chapter-item{active_cls}" id="menu-ch-{cnum}" onclick="switchChapter({cnum})">
           <span class="chapter-item-tag">{label}</span>
           <span>{html.escape(ctitle)}</span>
@@ -555,13 +607,22 @@ body {{
   
   <div class="control-drawer" id="controlDrawer">
     <div class="drawer-inner">
-      <audio id="audioTrack" controls preload="metadata" src="{first_ch_audio}"></audio>
+      <audio id="audioTrack" controls preload="metadata"></audio>
       <div class="drawer-row">
         <div class="drawer-group">
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
           <button class="icon-btn" onclick="adjustFontSize(1)">A+</button>
           <button class="icon-btn" onclick="toggleTheme()">Theme</button>
           <button class="icon-btn" id="tipsToggleBtn" onclick="toggleTips()">Tips</button>
+        </div>
+        <div class="drawer-group">
+          <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
+            Repeat
+            <select id="shadowRepeatSelect" onchange="setShadowRepetitions(this.value)">
+              <option value="1">1x</option><option value="3" selected>3x</option><option value="5">5x</option>
+            </select>
+          </label>
+          <button class="icon-btn" id="shadowBtn" onclick="toggleShadowing()">Repeat</button>
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; display: flex; align-items: center; gap: 4px; color: var(--text-sub);">
@@ -571,12 +632,19 @@ body {{
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
       <div class="drawer-tips" id="drawerTips">
-        <div class="tips-grid">
-          <div class="tips-item"><span class="tips-key">Tap English</span> Replay sentence & show breakdown</div>
-          <div class="tips-item"><span class="tips-key">Tap Chinese</span> Collapse card</div>
-          <div class="tips-item"><span class="tips-key">Spacebar</span> Toggle translation & vocabulary</div>
-          <div class="tips-item"><span class="tips-key">← / ↑</span> Jump to previous sentence</div>
-          <div class="tips-item"><span class="tips-key">→ / ↓</span> Jump to next sentence</div>
+        <div class="tips-columns">
+          <div class="tips-section">
+            <div class="tips-section-title">Touch & Mouse</div>
+            <div class="tips-row"><span class="tips-key">Tap Sentence</span><span>Play audio & show breakdown</span></div>
+            <div class="tips-row"><span class="tips-key">Double Tap</span><span>Repeat sentence loop</span></div>
+            <div class="tips-row"><span class="tips-key">Tap Card</span><span>Collapse card</span></div>
+          </div>
+          <div class="tips-section">
+            <div class="tips-section-title">Keyboard Shortcuts</div>
+            <div class="tips-row"><span class="tips-key">Space</span><span>Toggle breakdown card</span></div>
+            <div class="tips-row"><span class="tips-key">R</span><span>Repeat current sentence</span></div>
+            <div class="tips-row"><span class="tips-key">← / →</span><span>Previous / Next sentence</span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -590,13 +658,14 @@ body {{
         cnum = ch["num"]
         ctitle = ch["title"]
         caudio = ch["audio"]
+        cpublic_audio = ch.get("public_audio") or ""
         csents = ch["sentences"]
-        active_cls = " active" if cnum == 0 else ""
+        active_cls = " active" if cnum == first_ch_num else ""
         ch_heading_label = "PREFACE" if cnum == 0 else f"CHAPTER {cnum}"
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->
-  <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{caudio}" data-ch="{cnum}">
+  <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{html.escape(caudio)}" data-public-audio="{html.escape(cpublic_audio)}" data-ch="{cnum}">
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
       <h1 class="book-title">{ch_heading_label}<br>{html.escape(ctitle)}</h1>
@@ -614,6 +683,7 @@ body {{
             has_match = 1 if s.get("has_audio_match", True) and (end > start) else 0
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
+            raw_text = s.get("text", "")
             
             word_spans = s.get("word_spans", [])
             word_html_list = []
@@ -642,7 +712,7 @@ body {{
                 
             h_class = " chapter-heading-1" if is_h else ""
             html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}">
+      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
         <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
           <span class="s-content">{sentence_text_html}</span>
         </div>
@@ -657,10 +727,16 @@ body {{
   </section>
 """
 
-    html_tail = """
+    book_id_json = json.dumps(book_id)
+    html_tail = f"""
 </main>
 
 <script>
+window.__BOOK_ID__ = {book_id_json};
+window.__INITIAL_CHAPTER__ = {first_ch_num};
+window.__INITIAL_PUBLIC_AUDIO__ = {json.dumps(first_ch_public_audio)};
+const STORAGE_PREFIX = 'reader_' + (window.__BOOK_ID__ || 'default') + '_';
+""" + """
 const audio = document.getElementById('audioTrack');
 const globalPlayBtn = document.getElementById('globalPlayBtn');
 const controlDrawer = document.getElementById('controlDrawer');
@@ -668,16 +744,19 @@ const drawerToggleBtn = document.getElementById('drawerToggleBtn');
 const chapterDropdown = document.getElementById('chapterDropdown');
 const currentChapterLabel = document.getElementById('currentChapterLabel');
 
-let activeChapterNum = parseInt(localStorage.getItem('book_active_ch') || '0', 10);
-let autoScrollEnabled = localStorage.getItem('book_autoscroll') !== 'false';
+let activeChapterNum = parseInt(localStorage.getItem(STORAGE_PREFIX + 'active_ch') || String(window.__INITIAL_CHAPTER__), 10);
+let autoScrollEnabled = localStorage.getItem(STORAGE_PREFIX + 'autoscroll') !== 'false';
 let currentPlayingId = null;
 let currentActiveWordEl = null;
+let sentenceTimeIndex = [];
+let syncFrameId = null;
+const shadowState = { phase: 'idle', repetitions: 3, completed: 0, sentence: null, timer: null };
 
 document.getElementById('autoScrollCheck').checked = autoScrollEnabled;
 
 function toggleAutoScroll(enabled) {
   autoScrollEnabled = enabled;
-  localStorage.setItem('book_autoscroll', enabled);
+  localStorage.setItem(STORAGE_PREFIX + 'autoscroll', enabled);
 }
 
 // Chapter Switching
@@ -692,9 +771,41 @@ function closeDropdowns(event) {
   }
 }
 
+function resolveAudioSource(section) {
+  const localSource = section.dataset.audio;
+  const publicSource = section.dataset.publicAudio;
+  return window.location.protocol === 'file:' || !publicSource ? localSource : publicSource;
+}
+
+function rebuildSentenceTimeIndex() {
+  const section = document.querySelector('.chapter-section.active');
+  sentenceTimeIndex = section ? Array.from(section.querySelectorAll('.sentence-unit')).map(el => ({
+    start: parseFloat(el.dataset.start || '0'),
+    end: parseFloat(el.dataset.end || '0'),
+    el: el
+  })).filter(item => item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
+}
+
+function findSentenceAt(time) {
+  let low = 0;
+  let high = sentenceTimeIndex.length - 1;
+  let candidate = null;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const item = sentenceTimeIndex[middle];
+    if (item.start <= time) {
+      candidate = item;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return candidate && time < candidate.end ? candidate.el : null;
+}
+
 function switchChapter(chNum) {
   activeChapterNum = chNum;
-  localStorage.setItem('book_active_ch', chNum);
+  localStorage.setItem(STORAGE_PREFIX + 'active_ch', chNum);
   currentChapterLabel.textContent = chNum === 0 ? 'Preface' : 'Ch. ' + chNum;
   
   document.querySelectorAll('.chapter-item').forEach(el => el.classList.remove('active'));
@@ -706,7 +817,7 @@ function switchChapter(chNum) {
     sec.classList.remove('active');
     if (parseInt(sec.dataset.ch, 10) === chNum) {
       sec.classList.add('active');
-      const audioSrc = sec.dataset.audio;
+      const audioSrc = resolveAudioSource(sec);
       if (audio.getAttribute('src') !== audioSrc) {
         const wasPlaying = !audio.paused;
         audio.src = audioSrc;
@@ -719,28 +830,27 @@ function switchChapter(chNum) {
       }
     }
   });
+  rebuildSentenceTimeIndex();
   
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-if (activeChapterNum !== 0) {
-  switchChapter(activeChapterNum);
-}
+switchChapter(activeChapterNum);
 
 function toggleDrawer() {
   const isOpen = controlDrawer.classList.contains('open');
   if (isOpen) {
     controlDrawer.classList.remove('open');
     drawerToggleBtn.innerHTML = '⚙️ Menu';
-    localStorage.setItem('book_drawer_open', 'false');
+    localStorage.setItem(STORAGE_PREFIX + 'drawer_open', 'false');
   } else {
     controlDrawer.classList.add('open');
     drawerToggleBtn.innerHTML = '✕ Close';
-    localStorage.setItem('book_drawer_open', 'true');
+    localStorage.setItem(STORAGE_PREFIX + 'drawer_open', 'true');
   }
 }
 
-const savedDrawerState = localStorage.getItem('book_drawer_open');
+const savedDrawerState = localStorage.getItem(STORAGE_PREFIX + 'drawer_open');
 if (savedDrawerState === 'true') {
   controlDrawer.classList.add('open');
   drawerToggleBtn.innerHTML = '✕ Close';
@@ -751,10 +861,10 @@ let currentThemeIndex = 0;
 function toggleTheme() {
   currentThemeIndex = (currentThemeIndex + 1) % themes.length;
   document.documentElement.setAttribute('data-theme', themes[currentThemeIndex]);
-  localStorage.setItem('book_theme', themes[currentThemeIndex]);
+  localStorage.setItem(STORAGE_PREFIX + 'theme', themes[currentThemeIndex]);
 }
 
-const savedTheme = localStorage.getItem('book_theme');
+const savedTheme = localStorage.getItem(STORAGE_PREFIX + 'theme');
 if (savedTheme) {
   document.documentElement.setAttribute('data-theme', savedTheme);
   currentThemeIndex = themes.indexOf(savedTheme);
@@ -764,10 +874,10 @@ let currentFontSizeRem = 1.20;
 function adjustFontSize(delta) {
   currentFontSizeRem = Math.max(0.95, Math.min(1.8, currentFontSizeRem + delta * 0.08));
   document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
-  localStorage.setItem('book_font_size', currentFontSizeRem);
+  localStorage.setItem(STORAGE_PREFIX + 'font_size', currentFontSizeRem);
 }
 
-const savedFontSize = localStorage.getItem('book_font_size');
+const savedFontSize = localStorage.getItem(STORAGE_PREFIX + 'font_size');
 if (savedFontSize) {
   currentFontSizeRem = parseFloat(savedFontSize);
   document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
@@ -782,12 +892,45 @@ function toggleTips() {
   }
 }
 
+let lastSentenceClickTime = 0;
+let lastSentenceClickId = null;
+
+function startSentenceShadowing(sentenceEl) {
+  if (!sentenceEl || sentenceEl.dataset.matched !== '1') return;
+  if (shadowState.timer) clearTimeout(shadowState.timer);
+  shadowState.phase = 'playing';
+  shadowState.completed = 0;
+  shadowState.sentence = sentenceEl;
+  const btn = document.getElementById('shadowBtn');
+  if (btn) btn.textContent = 'Stop Repeat';
+  
+  const activeSection = document.querySelector('.chapter-section.active') || document.querySelector('.chapter-section');
+  if (activeSection && activeSection.dataset.audio) {
+    attachAudioSource(activeSection.dataset.audio);
+  }
+  const start = parseFloat(sentenceEl.dataset.start);
+  audio.currentTime = start;
+  audio.play();
+  globalPlayBtn.textContent = '⏸ Pause';
+  sentenceEl.classList.add('active');
+}
+
 function handleSentenceClick(event, id, start, end, hasMatch) {
   if (event) event.stopPropagation();
   const el = document.getElementById(id);
   if (!el) return;
   
-  localStorage.setItem('book_last_sentence_c' + activeChapterNum, id);
+  const now = Date.now();
+  const isDoubleTap = (lastSentenceClickId === id && (now - lastSentenceClickTime) < 350);
+  lastSentenceClickTime = now;
+  lastSentenceClickId = id;
+  
+  if (isDoubleTap) {
+    startSentenceShadowing(el);
+    return;
+  }
+  
+  localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
   if (start > 0 || hasMatch) {
     audio.currentTime = start;
     audio.play();
@@ -817,31 +960,81 @@ function toggleGlobalPlay() {
   }
 }
 
-audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; });
-audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; });
+audio.preservesPitch = true;
+audio.mozPreservesPitch = true;
+audio.webkitPreservesPitch = true;
+
+function setShadowRepetitions(value) {
+  shadowState.repetitions = Math.max(1, parseInt(value, 10) || 3);
+}
+
+function stopShadowing() {
+  if (shadowState.timer) clearTimeout(shadowState.timer);
+  shadowState.phase = 'idle';
+  shadowState.completed = 0;
+  shadowState.sentence = null;
+  shadowState.timer = null;
+  const btn = document.getElementById('shadowBtn');
+  if (btn) btn.textContent = 'Repeat';
+}
+
+function toggleShadowing() {
+  if (shadowState.phase !== 'idle') {
+    stopShadowing();
+    return;
+  }
+  const sentence = findSentenceAt(audio.currentTime) || document.getElementById(currentPlayingId);
+  if (sentence) {
+    startSentenceShadowing(sentence);
+  }
+}
+
+function advanceShadowing() {
+  if (shadowState.phase === 'idle' || !shadowState.sentence) return;
+  const end = parseFloat(shadowState.sentence.dataset.end);
+  if (audio.currentTime < end) return;
+  audio.pause();
+  shadowState.completed += 1;
+  if (shadowState.completed >= shadowState.repetitions) {
+    stopShadowing();
+    return;
+  }
+  shadowState.phase = 'pause_buffer';
+  shadowState.timer = setTimeout(() => {
+    if (!shadowState.sentence) return;
+    shadowState.phase = 'replaying';
+    audio.currentTime = parseFloat(shadowState.sentence.dataset.start);
+    audio.play();
+  }, 650);
+}
+
+function startSyncLoop() {
+  if (syncFrameId === null && !audio.paused && !document.hidden) syncFrameId = requestAnimationFrame(syncPlayback);
+}
+
+function stopSyncLoop() {
+  if (syncFrameId !== null) cancelAnimationFrame(syncFrameId);
+  syncFrameId = null;
+}
+
+audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; startSyncLoop(); });
+audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; stopSyncLoop(); });
+audio.addEventListener('timeupdate', syncPlayback);
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopSyncLoop(); else startSyncLoop(); });
 
 function syncPlayback() {
+  syncFrameId = null;
   if (!audio.paused) {
     const curTime = audio.currentTime;
     const activeSection = document.querySelector('.chapter-section.active');
     
     if (activeSection) {
-      const sentenceUnits = activeSection.querySelectorAll('.sentence-unit[data-matched="1"]');
-      let activeUnit = null;
-      
-      for (let u of sentenceUnits) {
-        const s = parseFloat(u.dataset.start);
-        const e = parseFloat(u.dataset.end);
-        if (curTime >= s && curTime < e) {
-          activeUnit = u;
-          break;
-        }
-      }
+      const activeUnit = findSentenceAt(curTime);
       
       if (activeUnit) {
         if (activeUnit.id !== currentPlayingId) {
           currentPlayingId = activeUnit.id;
-          localStorage.setItem('book_last_sentence_c' + activeChapterNum, activeUnit.id);
+          localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, activeUnit.id);
           
           if (autoScrollEnabled) {
             const rect = activeUnit.getBoundingClientRect();
@@ -875,11 +1068,12 @@ function syncPlayback() {
         }
       }
     }
+    advanceShadowing();
   }
-  requestAnimationFrame(syncPlayback);
+  startSyncLoop();
 }
 
-requestAnimationFrame(syncPlayback);
+rebuildSentenceTimeIndex();
 
 function handleSearch() {
   const query = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -914,6 +1108,12 @@ window.addEventListener('keydown', (e) => {
   if (units.length === 0) return;
   
   const curTime = audio.currentTime;
+
+  if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    toggleShadowing();
+    return;
+  }
   
   let currentIndex = units.findIndex(u => {
     const s = parseFloat(u.dataset.start);

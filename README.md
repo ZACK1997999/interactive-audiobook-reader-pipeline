@@ -19,6 +19,8 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`acoustic_whisper.py`](acoustic_whisper.py) | **Acoustic Engine**: Runs MLX Whisper for word-level timestamps. |
 | [`dynamic_aligner.py`](dynamic_aligner.py) | **Alignment Engine**: Global matching with evidence-bearing word spans. |
 | [`html_builder.py`](html_builder.py) | **Static HTML Compiler**: Builds the multi-chapter interactive reader. |
+| [`intake_reconciler.py`](intake_reconciler.py) | **P2 Intake Contract**: Parses EPUB structure, reconciles acoustic anchors, and enforces hash-bound human approval. |
+| [`publisher.py`](publisher.py) | **P2 Publication Protocol**: Resumes journaled archive/R2/Git/HTTP verification without duplicate work. |
 | [`audio_resolver.py`](audio_resolver.py) | **Audio Contract**: Resolves exactly one explicit chapter audio candidate. |
 | [`models.py`](models.py) | **Stable Internal Contracts**: Backend-neutral domain models introduced in Phase 1. |
 | [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
@@ -64,13 +66,95 @@ The default workflow remains MLX Whisper. WhisperX is exposed through the same
 
 This installs `reader-pipeline` and `reader-validate`. Deployment is never part of the normal processing command.
 Every generated JSON, manifest, validation report, and HTML file is written atomically. The
-pipeline records per-chapter state and hashes in `reader_run_manifest.json` and refuses to compile
-when any required analysis, alignment, or review gate fails.
+pipeline records hashes for every available canonical, analysis, acoustic, and audio input in
+`reader_run_manifest.json`; if a recorded input changes, the affected chapter is realigned
+instead of silently reusing its previous alignment. It refuses to compile when any required
+analysis, alignment, review, or 95% chapter-level acoustic coverage gate fails.
+
+The pipeline records `compiled` after local HTML generation. It does not claim that the reader
+was uploaded or externally verified; publication and external audio checks remain separate,
+explicit operations.
+
+Each book run also takes an exclusive lock so two pipeline processes cannot mutate the same
+artifacts concurrently. The written acceptance criteria are in
+[`QUALITY_STANDARD.md`](QUALITY_STANDARD.md). An explicit `audio_manifest.json` is created on
+the first successful discovery and becomes authoritative thereafter; changed or missing audio
+sources block the run.
+
+### Durable Coordinator for Unattended Runs
+
+Use [`industrial_orchestrator.py`](industrial_orchestrator.py) as the durable coordinator for
+overnight processing. It persists stage state, chapter attempts, input/output hashes, and failure
+reasons. Language and acoustic models are injected as workers through the `READER_*` environment
+contract; the coordinator never invents analysis or acoustic artifacts.
+
+Start with a safe dry-run:
+
+```bash
+python3 industrial_orchestrator.py \
+  --book-dir /path/to/private/book-output \
+  --state /path/to/private/book-output/industrial_run_state.json \
+  --dry-run
+```
+
+Then provide separately reviewed linguistic and acoustic worker commands. A worker reads
+`READER_CANONICAL_PATH`/`READER_AUDIO_PATH` and writes the contract file at `READER_OUTPUT_PATH`.
+Failed workers are retried up to `--max-attempts`; publication is not a coordinator stage.
+
+Before any configured worker may run, P2 requires an approved `intake_plan.json`. Generate the
+cheap head/tail acoustic probes with the selected acoustic backend, then build and review the
+plan:
+
+```bash
+reader-intake --epub /path/book.epub --audio-dir /path/audio \
+  --probes /path/acoustic_probes.json --output /path/book/intake_plan.json
+reader-intake --approve /path/book/intake_plan.json
+reader-intake --verify /path/book/intake_plan.json
+```
+
+Approval is bound to the complete plan plus the SHA-256 of the EPUB and every audio source.
+Changing any input closes the gate. Plans below the configured confidence threshold cannot be
+approved. The repository includes the default worker adapters:
+
+```bash
+python3 industrial_orchestrator.py \
+  --book-dir /path/to/private/book-output \
+  --linguistic-command 'python3 agy_linguistic_worker.py' \
+  --acoustic-command 'python3 mlx_acoustic_worker.py'
+```
+
+These adapters fail closed when `agy` or MLX cannot start, so a missing model, authentication
+failure, or hardware problem becomes a resumable blocker instead of a fabricated artifact.
+
+### P2 Reader and Publication
+
+`html_builder.py` now emits one dual-mode reader: `file://` uses the local audio path while HTTP
+uses the chapter's public CDN path. Sentence synchronization uses a per-chapter binary-search
+index and suspends animation frames while paused or hidden. Native pitch-preserving speed,
+sentence shadowing (`R`), and UTF-8 Anki TSV export are built into that same compiler.
+
+Install publication support and run the reviewed JSON configuration:
+
+```bash
+python3 -m pip install -e '.[deployment]'
+reader-publish /path/publisher_config.json
+```
+
+Start from [`publisher_config.example.json`](publisher_config.example.json). The publisher derives
+`chaptersCount`, `totalDuration`, the cover path, and the reader path from the compiled reader and
+approved intake/audio evidence, so shelf registration does not duplicate those computed fields.
+
+The publisher records `preflight -> archive -> r2_upload -> remote_verify -> git_stage ->
+git_push -> smoke_test` in `publisher_journal.json`. R2 objects are skipped only when their
+stored SHA-256 metadata matches. Every public audio object must return exact HTTP 206 ranges at
+its beginning, middle, and end before the publisher creates a whitelisted Git commit. The portal
+must load `manifest.json` as its single data source; a remaining `INLINE_MANIFEST` blocks
+preflight.
 
 ### 1-Line AI Instruction (Recommended)
 Simply say:
 ```text
-Please process this book using the current branch workflow. Read README.md, SPECIFICATION.md, and LINGUISTIC_ANALYSIS_PROMPT.md first. Gemini handles linguistic analysis; local scripts handle extraction, acoustic alignment, validation, and HTML compilation.
+Please process this book using the current branch workflow. Read README.md, SPECIFICATION.md, and LINGUISTIC_ANALYSIS_PROMPT.md first. Agy handles linguistic analysis; local scripts handle extraction, acoustic alignment, validation, and HTML compilation.
 ```
 
 ### Manual CLI Execution

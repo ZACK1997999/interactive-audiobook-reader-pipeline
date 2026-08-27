@@ -1,0 +1,22 @@
+{
+  "book_id": "example-book",
+  "reader_html": "/path/to/book/Example_Interactive_Reader.html",
+  "audio_manifest": "/path/to/book/audio_manifest.json",
+  "intake_plan": "/path/to/book/intake_plan.json",
+  "cover": "/path/to/book/cover.jpg",
+  "archive_html": "/path/to/obsidian/Example_Interactive_Reader.html",
+  "portal_repo": "/Users/lindy/Vault/Audible",
+  "public_reader_url": "https://zack1997999.github.io/Audible/books/example-book/",
+  "manifest_entry": {
+    "title": "Example Book",
+    "subtitle": "A short subtitle",
+    "author": "Example Author",
+    "accentColor": "#8b4513",
+    "genre": "Nonfiction",
+    "tags": ["Learning"],
+    "description": "A concise shelf description.",
+    "status": "Studio Audiobook"
+  },
+  "git_remote": "origin",
+  "git_branch": "main"
+}
