@@ -5,6 +5,25 @@ import unittest
 from pathlib import Path
 
 from html_builder import build_master_reader
+from validate_outputs import validate_for_release
+
+
+def _make_release_token(tmp_path: Path):
+    (tmp_path / "audio").mkdir(exist_ok=True)
+    (tmp_path / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+    canonical = [{"id": "s-1", "text": "A complete sentence."}]
+    analysis = [{"id": "s-1", "text": "A complete sentence.", "trans": "一个完整的句子。", "vocab": []}]
+    aligned = [{
+        **analysis[0], "word_spans": [{"word": "A", "start": 0.0, "end": 0.2}],
+        "raw_start": 0.0, "raw_end": 1.0, "has_audio_match": True,
+        "fallback_used": False, "alignment_status": "validated",
+        "matched_token_count": 3, "source_token_count": 3, "match_ratio": 1.0,
+    }]
+    for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+        (tmp_path / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+    report_path = tmp_path / "reader_validation_report.json"
+    _, token = validate_for_release(tmp_path, report_path)
+    return token, report_path
 
 
 class HTMLBuilderTests(unittest.TestCase):
@@ -26,6 +45,7 @@ class HTMLBuilderTests(unittest.TestCase):
                 encoding="utf-8",
             )
             output = tmp_path / "reader.html"
+            token, report_path = _make_release_token(tmp_path)
 
             build_master_reader(
                 book_title="Test Book",
@@ -35,9 +55,11 @@ class HTMLBuilderTests(unittest.TestCase):
                     "num": 1,
                     "title": "Chapter One",
                     "audio": "./audio/chapter_01.mp3",
-                    "aligned_json": str(aligned),
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
                 }],
                 output_html_path=str(output),
+                release_token=token,
+                release_report_path=report_path,
             )
 
             rendered = output.read_text(encoding="utf-8")
@@ -67,6 +89,7 @@ def test_diagnostics_are_concrete_and_placeholder_free(tmp_path: Path):
         encoding="utf-8",
     )
     output = tmp_path / "reader.html"
+    token, report_path = _make_release_token(tmp_path)
 
     build_master_reader(
         book_title="Test Book",
@@ -76,9 +99,11 @@ def test_diagnostics_are_concrete_and_placeholder_free(tmp_path: Path):
             "num": 1,
             "title": "Chapter One",
             "audio": "./audio/chapter_01.mp3",
-            "aligned_json": str(aligned),
+                "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
         }],
         output_html_path=str(output),
+        release_token=token,
+        release_report_path=report_path,
     )
 
     rendered = output.read_text(encoding="utf-8")
@@ -86,3 +111,17 @@ def test_diagnostics_are_concrete_and_placeholder_free(tmp_path: Path):
     assert "<strong>Diagnostics</strong>" in rendered
     assert "Chapter 1: Chapter One" in rendered
     assert "status-verified" in rendered
+
+
+def test_html_builder_rejects_missing_release_authorization(tmp_path: Path):
+    aligned = tmp_path / "aligned.json"
+    aligned.write_text("[]", encoding="utf-8")
+    try:
+        build_master_reader(
+            "Test", "Test", "Author", [], str(tmp_path / "reader.html"),
+            release_token=None, release_report_path=tmp_path / "missing.json",
+        )
+    except Exception as exc:
+        assert "ReleaseToken" in str(exc)
+    else:
+        raise AssertionError("HTML builder accepted compilation without release authorization")
