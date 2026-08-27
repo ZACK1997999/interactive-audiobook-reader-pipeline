@@ -1019,6 +1019,7 @@ function stopSyncLoop() {
 
 audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; startSyncLoop(); });
 audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; stopSyncLoop(); });
+audio.addEventListener('timeupdate', syncPlayback);
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopSyncLoop(); else startSyncLoop(); });
 
 function syncPlayback() {
