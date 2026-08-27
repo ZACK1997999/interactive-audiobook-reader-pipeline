@@ -65,3 +65,19 @@ python3 publication_verify.py \
 Keep R2/S3 credentials in the environment, OS keychain, or a secret manager. Never commit them to
 an uploader script, chat export, or repository. The public URL is safe to publish; write-access
 credentials are not.
+
+For uploads, create an explicit `audio_manifest.json` first and use the manifest-driven uploader:
+
+```bash
+python3 -m pip install -e '.[deployment]'
+export CLOUDFLARE_R2_ACCOUNT_ID='...'
+export CLOUDFLARE_R2_ACCESS_KEY_ID='...'
+export CLOUDFLARE_R2_SECRET_ACCESS_KEY='...'
+export CLOUDFLARE_R2_BUCKET='...'
+reader-r2-upload /path/to/audio_manifest.json --dry-run
+reader-r2-upload /path/to/audio_manifest.json
+```
+
+The uploader requires every manifest source file to exist and uploads exactly the listed object
+keys. It does not infer book scope from a directory or claim completion for files absent from the
+manifest.
