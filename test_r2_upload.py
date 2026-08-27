@@ -16,10 +16,7 @@ class R2UploadTests(unittest.TestCase):
             source.write_bytes(b"audio")
             manifest = root / "audio_manifest.json"
             manifest.write_text(json.dumps({"entries": [{"source_path": str(source), "object_key": "book/chapter_01.mp3"}]}))
-            environment = {name: "configured" for name in (
-                "CLOUDFLARE_R2_ACCOUNT_ID", "CLOUDFLARE_R2_ACCESS_KEY_ID",
-                "CLOUDFLARE_R2_SECRET_ACCESS_KEY", "CLOUDFLARE_R2_BUCKET",
-            )}
+            environment = {"R2_ACCESS_KEY_ID": "configured", "R2_SECRET_ACCESS_KEY": "configured"}
             with patch.dict(os.environ, environment, clear=False):
                 self.assertEqual(upload_manifest(manifest, dry_run=True), 1)
 

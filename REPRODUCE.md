@@ -70,13 +70,14 @@ For uploads, create an explicit `audio_manifest.json` first and use the manifest
 
 ```bash
 python3 -m pip install -e '.[deployment]'
-export CLOUDFLARE_R2_ACCOUNT_ID='...'
-export CLOUDFLARE_R2_ACCESS_KEY_ID='...'
-export CLOUDFLARE_R2_SECRET_ACCESS_KEY='...'
-export CLOUDFLARE_R2_BUCKET='...'
+export R2_ACCESS_KEY_ID='...'
+export R2_SECRET_ACCESS_KEY='...'
 reader-r2-upload /path/to/audio_manifest.json --dry-run
 reader-r2-upload /path/to/audio_manifest.json
 ```
+
+The uploader contains the confirmed non-secret R2 account ID and bucket name. Wrangler and
+`CLOUDFLARE_API_TOKEN` are not required for S3-compatible audio uploads.
 
 The uploader requires every manifest source file to exist and uploads exactly the listed object
 keys. It does not infer book scope from a directory or claim completion for files absent from the
