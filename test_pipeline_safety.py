@@ -5,6 +5,7 @@ from pathlib import Path
 
 from artifact_io import atomic_write_json
 from pipeline import _public_audio_url, auto_discover_and_build
+from quality_gate import smoke_check_html, validate_semantic_review
 
 
 class PipelineSafetyTests(unittest.TestCase):
@@ -50,6 +51,43 @@ class PipelineSafetyTests(unittest.TestCase):
             self.assertEqual(json.loads(output.read_text()), {"status": "complete"})
             self.assertEqual(list(output.parent.glob("*.tmp")), [])
             self.assertEqual(list(output.parent.glob(f".{output.name}.*")), [])
+
+    def test_quality_smoke_check_requires_reader_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reader.html"
+            path.write_text("<html><body></body></html>", encoding="utf-8")
+            report = smoke_check_html(path)
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("missing HTML5 doctype", report["errors"])
+
+    def test_semantic_review_requires_explicit_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "reader_semantic_review.json"
+            path.write_text(json.dumps({
+                "schema_version": 1,
+                "status": "approved",
+                "reviewer": "owner",
+                "reviewed_at": "2026-08-27",
+                "method": "beginning-middle-end sample",
+                "samples": [{
+                    "chapter": 1,
+                    "sentence_ids": ["s-1"],
+                    "checks": {
+                        "translation_accuracy": True,
+                        "alignment_semantics": True,
+                        "vocabulary_quality": True,
+                    },
+                }],
+            }), encoding="utf-8")
+            self.assertEqual(validate_semantic_review(path, required_chapters=[1])["status"], "passed")
+
+    def test_book_run_lock_rejects_concurrent_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from pipeline import _book_run_lock
+            with _book_run_lock(tmp):
+                with self.assertRaises(RuntimeError):
+                    with _book_run_lock(tmp):
+                        pass
 
 
 if __name__ == "__main__":

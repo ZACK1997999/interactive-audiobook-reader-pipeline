@@ -64,13 +64,57 @@ The default workflow remains MLX Whisper. WhisperX is exposed through the same
 
 This installs `reader-pipeline` and `reader-validate`. Deployment is never part of the normal processing command.
 Every generated JSON, manifest, validation report, and HTML file is written atomically. The
-pipeline records per-chapter state and hashes in `reader_run_manifest.json` and refuses to compile
-when any required analysis, alignment, or review gate fails.
+pipeline records hashes for every available canonical, analysis, acoustic, and audio input in
+`reader_run_manifest.json`; if a recorded input changes, the affected chapter is realigned
+instead of silently reusing its previous alignment. It refuses to compile when any required
+analysis, alignment, review, or 95% chapter-level acoustic coverage gate fails.
+
+The pipeline records `compiled` after local HTML generation. It does not claim that the reader
+was uploaded or externally verified; publication and external audio checks remain separate,
+explicit operations.
+
+Each book run also takes an exclusive lock so two pipeline processes cannot mutate the same
+artifacts concurrently. The written acceptance criteria are in
+[`QUALITY_STANDARD.md`](QUALITY_STANDARD.md). An explicit `audio_manifest.json` is created on
+the first successful discovery and becomes authoritative thereafter; changed or missing audio
+sources block the run.
+
+### Durable Coordinator for Unattended Runs
+
+Use [`industrial_orchestrator.py`](industrial_orchestrator.py) as the durable coordinator for
+overnight processing. It persists stage state, chapter attempts, input/output hashes, and failure
+reasons. Language and acoustic models are injected as workers through the `READER_*` environment
+contract; the coordinator never invents analysis or acoustic artifacts.
+
+Start with a safe dry-run:
+
+```bash
+python3 industrial_orchestrator.py \
+  --book-dir /path/to/private/book-output \
+  --state /path/to/private/book-output/industrial_run_state.json \
+  --dry-run
+```
+
+Then provide separately reviewed linguistic and acoustic worker commands. A worker reads
+`READER_CANONICAL_PATH`/`READER_AUDIO_PATH` and writes the contract file at `READER_OUTPUT_PATH`.
+Failed workers are retried up to `--max-attempts`; publication is not a coordinator stage.
+
+The repository includes the default adapters:
+
+```bash
+python3 industrial_orchestrator.py \
+  --book-dir /path/to/private/book-output \
+  --linguistic-command 'python3 agy_linguistic_worker.py' \
+  --acoustic-command 'python3 mlx_acoustic_worker.py'
+```
+
+These adapters fail closed when `agy` or MLX cannot start, so a missing model, authentication
+failure, or hardware problem becomes a resumable blocker instead of a fabricated artifact.
 
 ### 1-Line AI Instruction (Recommended)
 Simply say:
 ```text
-Please process this book using the current branch workflow. Read README.md, SPECIFICATION.md, and LINGUISTIC_ANALYSIS_PROMPT.md first. Gemini handles linguistic analysis; local scripts handle extraction, acoustic alignment, validation, and HTML compilation.
+Please process this book using the current branch workflow. Read README.md, SPECIFICATION.md, and LINGUISTIC_ANALYSIS_PROMPT.md first. Agy handles linguistic analysis; local scripts handle extraction, acoustic alignment, validation, and HTML compilation.
 ```
 
 ### Manual CLI Execution

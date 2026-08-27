@@ -9,6 +9,7 @@ books/
 outputs/
 generated/
 data/
+.runs/
 
 # Local Python/runtime files
 __pycache__/
@@ -21,4 +22,3 @@ venv/
 # Machine-specific configuration
 local_config.*
 config.local.*
-

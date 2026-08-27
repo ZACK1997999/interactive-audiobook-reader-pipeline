@@ -36,6 +36,20 @@ class ReleaseGateTests(unittest.TestCase):
             self._write_fixture(root, status="review-required")
             self.assertNotEqual(validate(root), 0)
 
+    def test_low_chapter_acoustic_coverage_blocks_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0]["matched_token_count"] = 1
+            data[0]["source_token_count"] = 10
+            data[0]["match_ratio"] = 0.1
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+            report = json.loads((root / "reader_validation_report.json").read_text(encoding="utf-8")) if (root / "reader_validation_report.json").exists() else None
+            self.assertIsNone(report)
+
     def test_owner_review_ledger_accepts_explicit_audio_exception(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

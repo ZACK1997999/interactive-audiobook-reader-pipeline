@@ -12,6 +12,8 @@ import json
 import glob
 import re
 import hashlib
+import contextlib
+import fcntl
 from pathlib import Path
 
 PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +25,24 @@ from validate_outputs import validate_for_release
 from chapter_resolver import discover_chapters
 from audio_resolver import resolve_chapter_audio
 from run_manifest import update_manifest
+from quality_gate import smoke_check_html
+from artifact_io import atomic_write_json
+
+
+@contextlib.contextmanager
+def _book_run_lock(book_dir):
+    """Prevent two processes from mutating one book's artifacts concurrently."""
+    lock_path = Path(book_dir) / ".reader-pipeline.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("w", encoding="utf-8") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(f"Another reader pipeline run is active for {book_dir}") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _file_sha256(path):
@@ -31,6 +51,58 @@ def _file_sha256(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _existing_manifest(book_dir):
+    path = Path(book_dir) / "reader_run_manifest.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _load_audio_manifest(book_dir):
+    path = Path(book_dir) / "audio_manifest.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError(f"Invalid audio_manifest.json: {exc}") from exc
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("audio_manifest.json must contain a non-empty entries list")
+    result = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("chapter"), int):
+            raise RuntimeError("audio_manifest.json contains an invalid chapter entry")
+        source = Path(entry.get("source_path", "")).expanduser().resolve()
+        expected = entry.get("source_sha256")
+        if not source.is_file() or not isinstance(expected, str) or _file_sha256(str(source)) != expected:
+            raise RuntimeError(f"Audio manifest source missing or changed for chapter {entry['chapter']}")
+        if entry["chapter"] in result:
+            raise RuntimeError(f"audio_manifest.json has duplicate chapter {entry['chapter']}")
+        result[entry["chapter"]] = entry
+    return result
+
+
+def _write_audio_manifest(book_dir, audio_by_chapter, public_audio_base_url=None, public_book_id=None):
+    entries = []
+    for chapter in sorted(audio_by_chapter):
+        source = Path(audio_by_chapter[chapter]).resolve()
+        entry = {
+            "chapter": chapter,
+            "source_path": str(source),
+            "source_sha256": _file_sha256(str(source)),
+            "bytes": source.stat().st_size,
+            "object_key": f"{public_book_id or Path(book_dir).name}/chapter_{chapter:02d}.mp3",
+        }
+        if public_audio_base_url:
+            entry["public_url"] = f"{public_audio_base_url.rstrip('/')}/{entry['object_key']}"
+        entries.append(entry)
+    path = Path(book_dir) / "audio_manifest.json"
+    atomic_write_json(path, {"schema_version": 1, "book_id": public_book_id or Path(book_dir).name, "entries": entries})
+    return _load_audio_manifest(book_dir)
 
 
 def _analysis_ready(path, canonical_path):
@@ -65,8 +137,8 @@ def _public_audio_url(public_audio_base_url, public_book_id, chapter_number):
         f"chapter_{public_chapter:02d}.mp3"
     )
 
-def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
-                            force_realign=False, public_audio_base_url=None, public_book_id=None):
+def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
+                             force_realign=False, public_audio_base_url=None, public_book_id=None):
     """
     Universally auto-discovers all chapters in a book directory,
     runs global alignment on ready pairs, and compiles the Master Interactive Reader.
@@ -95,9 +167,27 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
     if not chapter_artifacts:
         print(f"No canonical sentence files found in {book_dir}")
         return 0, master_html_path
+
+    audio_manifest = _load_audio_manifest(book_dir)
+    discovered_audio = {}
+    if audio_manifest is None:
+        for artifact in chapter_artifacts:
+            candidate = _find_chapter_audio(audio_dir, artifact.chapter_number)
+            if candidate:
+                discovered_audio[artifact.chapter_number] = candidate
+        if len(discovered_audio) != len(chapter_artifacts):
+            raise RuntimeError("Create audio_manifest.json or resolve every chapter to exactly one audio file")
+        audio_manifest = _write_audio_manifest(book_dir, discovered_audio, public_audio_base_url, public_book_id)
         
     aligned_configs = []
     manifest_chapters = []
+    previous_manifest = _existing_manifest(book_dir)
+    previous_chapters = {
+        item.get("chapter"): item
+        for item in previous_manifest.get("chapters", [])
+        if isinstance(item, dict)
+    }
+    input_files = []
     
     for artifact in chapter_artifacts:
         c_path = str(artifact.canonical_path)
@@ -109,8 +199,11 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         acoustic_path = str(artifact.acoustic_path)
         
         # Audio file matching
-        audio_file = _find_chapter_audio(audio_dir, ch_num)
-        public_audio_url = _public_audio_url(public_audio_base_url, public_book_id, ch_num)
+        audio_entry = audio_manifest.get(ch_num)
+        audio_file = audio_entry.get("source_path") if audio_entry else None
+        public_audio_url = audio_entry.get("public_url") if audio_entry else None
+        if not public_audio_url:
+            public_audio_url = _public_audio_url(public_audio_base_url, public_book_id, ch_num)
         if public_audio_url:
             audio_file_rel = public_audio_url
         else:
@@ -118,6 +211,18 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
                 
         has_analysis = os.path.exists(analysis_path) and _analysis_ready(analysis_path, c_path)
         has_acoustic = os.path.exists(acoustic_path) and os.path.getsize(acoustic_path) > 1000
+        canonical_sha256 = _file_sha256(c_path) if os.path.exists(c_path) else None
+        analysis_sha256 = _file_sha256(analysis_path) if os.path.exists(analysis_path) else None
+        acoustic_sha256 = _file_sha256(acoustic_path) if os.path.exists(acoustic_path) else None
+        audio_sha256 = _file_sha256(audio_file) if audio_file and os.path.exists(audio_file) else None
+        for role, path in (
+            ("canonical", c_path),
+            ("analysis", analysis_path),
+            ("acoustic", acoustic_path),
+            ("audio", audio_file),
+        ):
+            if path and os.path.isfile(path):
+                input_files.append((role, path))
         manifest_chapters.append({
             "chapter": ch_num,
             "status": "ready" if has_analysis and has_acoustic else "blocked",
@@ -125,12 +230,22 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             "analysis": os.path.relpath(analysis_path, book_dir),
             "acoustic": os.path.relpath(acoustic_path, book_dir),
             "aligned": os.path.relpath(aligned_path, book_dir),
-            "analysis_sha256": _file_sha256(analysis_path) if os.path.exists(analysis_path) else None,
-            "acoustic_sha256": _file_sha256(acoustic_path) if os.path.exists(acoustic_path) else None,
+            "canonical_sha256": canonical_sha256,
+            "analysis_sha256": analysis_sha256,
+            "acoustic_sha256": acoustic_sha256,
+            "audio_sha256": audio_sha256,
         })
         
         if has_analysis and has_acoustic:
             needs_align = force_realign or not os.path.exists(aligned_path)
+            previous = previous_chapters.get(ch_num, {})
+            if any(previous.get(key) != value for key, value in (
+                ("canonical_sha256", canonical_sha256),
+                ("analysis_sha256", analysis_sha256),
+                ("acoustic_sha256", acoustic_sha256),
+                ("audio_sha256", audio_sha256),
+            )):
+                needs_align = True
             if not needs_align:
                 if os.path.getmtime(acoustic_path) > os.path.getmtime(aligned_path) or os.path.getmtime(analysis_path) > os.path.getmtime(aligned_path):
                     needs_align = True
@@ -165,17 +280,17 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             entry["aligned_sha256"] = _file_sha256(aligned_file)
             if entry["status"] == "ready":
                 entry["status"] = "aligned"
-    update_manifest(book_dir, manifest_chapters, status="prepared")
+    update_manifest(book_dir, manifest_chapters, status="prepared", input_files=input_files)
     print(f"\nDiscovered {len(aligned_configs)} / {len(chapter_artifacts)} ready aligned chapters for {book_title}")
     if not aligned_configs:
-        update_manifest(book_dir, manifest_chapters, status="blocked")
+        update_manifest(book_dir, manifest_chapters, status="blocked", input_files=input_files)
         print("Release blocked: no chapters have complete analysis and acoustic artifacts.")
         return 0, master_html_path
     if aligned_configs:
         report_path = os.path.join(book_dir, "reader_validation_report.json")
         report, release_token = validate_for_release(Path(book_dir), Path(report_path))
         if release_token is None:
-            update_manifest(book_dir, manifest_chapters, status="blocked")
+            update_manifest(book_dir, manifest_chapters, status="blocked", input_files=input_files)
             print(f"Release blocked. See {report_path}")
             return 0, master_html_path
         print("--> Compiling Master Multi-Chapter Interactive Reader...")
@@ -188,10 +303,27 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             release_token=release_token,
             release_report_path=report_path,
         )
-        update_manifest(book_dir, manifest_chapters, status="released")
+        smoke = smoke_check_html(Path(master_html_path), expected_chapters=len(aligned_configs))
+        if smoke["status"] != "passed":
+            update_manifest(book_dir, manifest_chapters, status="blocked", input_files=input_files)
+            raise RuntimeError("Reader smoke check failed: " + "; ".join(smoke["errors"]))
+        # This command compiles locally; it does not upload or externally verify
+        # the reader.  Keep the manifest honest so downstream publication steps
+        # cannot mistake local compilation for a public release.
+        update_manifest(book_dir, manifest_chapters, status="compiled", input_files=input_files)
         print(f"Successfully generated/updated: {master_html_path}")
         
     return len(aligned_configs), master_html_path
+
+
+def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
+                            force_realign=False, public_audio_base_url=None, public_book_id=None):
+    book_dir = os.path.abspath(book_dir)
+    with _book_run_lock(book_dir):
+        return _auto_discover_and_build(
+            book_dir, book_title, book_subtitle, book_author,
+            force_realign, public_audio_base_url, public_book_id,
+        )
 
 def main():
     parser = argparse.ArgumentParser(description="Universal Interactive Audiobook Reader Industrial Pipeline")

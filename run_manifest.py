@@ -36,7 +36,17 @@ def create_manifest(book_dir, source_files, audio_files, model="mlx-community/wh
     return output
 
 
-def update_manifest(book_dir, chapters, status="in_progress", model="mlx-community/whisper-large-v3-turbo"):
+def _input_record(path, role):
+    path = Path(path).expanduser().resolve()
+    return {
+        "role": role,
+        "path": str(path),
+        "sha256": sha256(path),
+        "bytes": path.stat().st_size,
+    }
+
+
+def update_manifest(book_dir, chapters, status="in_progress", model="mlx-community/whisper-large-v3-turbo", input_files=None):
     """Write a resumable chapter-stage manifest without copying book content."""
     try:
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
@@ -49,6 +59,10 @@ def update_manifest(book_dir, chapters, status="in_progress", model="mlx-communi
             existing = json.loads(output.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             existing = {}
+    if input_files is None:
+        recorded_inputs = existing.get("input_files", [])
+    else:
+        recorded_inputs = [_input_record(path, role) for role, path in input_files if Path(path).is_file()]
     manifest = {
         "schema_version": 2,
         "run_id": existing.get("run_id") or uuid.uuid4().hex,
@@ -59,6 +73,7 @@ def update_manifest(book_dir, chapters, status="in_progress", model="mlx-communi
         "status": status,
         "source_files": existing.get("source_files", []),
         "audio_files": existing.get("audio_files", []),
+        "input_files": recorded_inputs,
         "chapters": chapters,
     }
     atomic_write_json(output, manifest)

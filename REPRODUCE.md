@@ -45,6 +45,12 @@ analysis must preserve canonical text and record order. Generated artifacts use 
 partial files are not treated as completed stages. `reader_run_manifest.json` records chapter state
 and input/output hashes for resumability and tamper detection.
 
+The pipeline creates and then trusts an explicit `audio_manifest.json`; its source hashes must
+remain valid. It also takes an exclusive per-book lock, performs an independent static reader
+smoke check after compilation, and exposes `reader-quality-check` for checking a compiled reader
+and a human semantic-review record. The acceptance criteria are documented in
+[`QUALITY_STANDARD.md`](QUALITY_STANDARD.md).
+
 Out-of-order matches are valid only when the alignment evidence is strong and the record has
 been explicitly changed from `review-required` to `reviewed` with reason
 `global_match_out_of_order`. This separates canonical reading order from physical audio order

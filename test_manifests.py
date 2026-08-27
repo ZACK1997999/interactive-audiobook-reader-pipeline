@@ -35,6 +35,25 @@ class ManifestTests(unittest.TestCase):
             self.assertEqual(second["status"], "released")
             self.assertEqual(second["source_files"][0]["sha256"], "abc")
 
+    def test_run_manifest_records_complete_input_hashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            canonical = root / "book_ch01_canonical_sentences.json"
+            audio = root / "chapter_01.mp3"
+            canonical.write_text("[]", encoding="utf-8")
+            audio.write_bytes(b"audio")
+            update_manifest(
+                root,
+                [],
+                status="prepared",
+                input_files=[("canonical", canonical), ("audio", audio)],
+            )
+            manifest = json.loads((root / "reader_run_manifest.json").read_text())
+            by_role = {entry["role"]: entry for entry in manifest["input_files"]}
+            self.assertEqual(set(by_role), {"canonical", "audio"})
+            self.assertEqual(by_role["canonical"]["bytes"], 2)
+            self.assertEqual(len(by_role["audio"]["sha256"]), 64)
+
 
 if __name__ == "__main__":
     unittest.main()

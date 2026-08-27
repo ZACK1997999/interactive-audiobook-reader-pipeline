@@ -10,6 +10,7 @@ from release_token import issue_release_token
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 ABBREVIATION_BEFORE_CAPITAL = re.compile(r"(?:Mrs|Mr|Ms|Dr|U\.S)$")
+MIN_CHAPTER_AUDIO_COVERAGE = 0.95
 
 
 def _suspicious_sentence_boundaries(text: str) -> list[str]:
@@ -169,6 +170,8 @@ def validate(book_dir: Path, report_path=None):
 
         previous_start = -1.0
         review_ids = []
+        covered_tokens = 0
+        expected_tokens = 0
         for item in aligned_data:
             item_id = item.get("id", "<unknown>")
             is_heading = item.get("is_heading", False)
@@ -201,9 +204,22 @@ def validate(book_dir: Path, report_path=None):
             previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
+            source_tokens = int(item.get("source_token_count", 0))
+            if not is_heading and not non_narrated and not owner_accepted:
+                expected_tokens += max(source_tokens, 0)
+                covered_tokens += min(max(matched, 0), max(source_tokens, 0))
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or ratio < 0.5):
                 review_ids.append(item_id)
         record["review_required_records"] = len(review_ids)
+        coverage = covered_tokens / expected_tokens if expected_tokens else 1.0
+        record["acoustic_coverage"] = coverage
+        record["covered_audio_tokens"] = covered_tokens
+        record["expected_audio_tokens"] = expected_tokens
+        if coverage < MIN_CHAPTER_AUDIO_COVERAGE:
+            errors.append(
+                f"{label}: acoustic coverage {coverage:.1%} is below the "
+                f"{MIN_CHAPTER_AUDIO_COVERAGE:.0%} release threshold"
+            )
         if review_ids:
             warnings.append(f"{label}: {len(review_ids)} alignment records require review ({', '.join(review_ids[:8])})")
             record["status"] = "review-required"
