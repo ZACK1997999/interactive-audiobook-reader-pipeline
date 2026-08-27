@@ -56,6 +56,19 @@ class AlignmentEvidenceTests(unittest.TestCase):
         self.assertEqual(item["alignment_status"], "review-required")
         self.assertEqual(item["alignment_reason"], "ambiguous_short_sentence")
 
+    def test_short_exact_match_uses_unique_neighbor_bounded_occurrence(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate(
+            "opening context excuse me closing context excuse me".split()
+        )]
+        result = self.run_alignment(words, [
+            {"id": "s-1", "text": "opening context"},
+            {"id": "s-2", "text": "Excuse me!"},
+            {"id": "s-3", "text": "closing context"},
+        ])
+        self.assertEqual(result[1]["alignment_status"], "validated")
+        self.assertEqual(result[1]["alignment_method"], "contextual_short_exact_match")
+        self.assertEqual(result[1]["word_spans"][0]["start"], 2)
+
     def test_common_contraction_matches_spoken_expansion(self):
         words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("I did not know".split())]
         item = self.run_alignment(words, [{"id": "s-1", "text": "I didn't know."}])[0]

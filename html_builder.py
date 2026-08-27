@@ -8,8 +8,10 @@ import html
 import os
 import sys
 from artifact_io import atomic_write_text
+from release_token import ReleaseToken, verify_release_token
 
-def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path):
+def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path,
+                        *, release_token: ReleaseToken, release_report_path):
     """
     chapters_config: list of dicts with:
       - 'num': int (e.g. 1, 2)
@@ -17,6 +19,19 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
       - 'audio': str (e.g. './audio/chapter_01.mp3')
       - 'aligned_json': str (path to aligned sentences JSON)
     """
+    output_html_path = os.path.abspath(output_html_path)
+    book_dir = os.path.dirname(output_html_path)
+    verify_release_token(release_token, book_dir, release_report_path)
+    with open(release_report_path, encoding="utf-8") as report_file:
+        report = json.load(report_file)
+    authorized = {
+        os.path.abspath(os.path.join(book_dir, chapter["aligned"]))
+        for chapter in report.get("chapters", []) if chapter.get("aligned")
+    }
+    requested = {os.path.abspath(c["aligned_json"]) for c in chapters_config}
+    if requested != authorized:
+        raise RuntimeError("HTML compilation chapter set does not match the validated release report")
+
     loaded_chapters = []
     for c in chapters_config:
         with open(c['aligned_json'], 'r', encoding='utf-8') as f:

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from validate_outputs import _chapter_audio_exists, validate
+from validate_outputs import _chapter_audio_exists, _suspicious_sentence_boundaries, validate
 from dynamic_aligner import align_sentences_with_audio
 from pipeline import _find_chapter_audio
 
@@ -35,6 +35,27 @@ class ReleaseGateTests(unittest.TestCase):
             root = Path(tmp)
             self._write_fixture(root, status="review-required")
             self.assertNotEqual(validate(root), 0)
+
+    def test_owner_review_ledger_accepts_explicit_audio_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0]["has_audio_match"] = False
+            data[0]["fallback_used"] = True
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            (root / "reader_review_ledger.json").write_text(json.dumps({
+                "schema_version": 1,
+                "reviews": [{
+                    "chapter": 1,
+                    "sentence_id": "s-1",
+                    "decision": "accepted",
+                    "reviewer": "project_owner",
+                    "evidence": "Reviewed audiobook wording discrepancy.",
+                }],
+            }), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
 
     def test_reviewed_out_of_order_alignment_can_release(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -114,6 +135,11 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertIsNone(_find_chapter_audio(str(root / "audio"), 1))
             self.assertFalse(_chapter_audio_exists(root / "audio", 1))
             self.assertNotEqual(validate(root), 0)
+
+    def test_common_abbreviations_do_not_trigger_boundary_warning(self):
+        self.assertEqual(_suspicious_sentence_boundaries("Mrs. Winchester asked Dr. Hewitt.") , [])
+        self.assertEqual(_suspicious_sentence_boundaries("A Guide to U.S. Prisons."), [])
+        self.assertTrue(_suspicious_sentence_boundaries("The door opened. Millie stepped inside."))
 
 
 if __name__ == "__main__":

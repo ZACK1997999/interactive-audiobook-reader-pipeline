@@ -19,7 +19,7 @@ sys.path.append(PIPELINE_DIR)
 
 from dynamic_aligner import align_sentences_with_audio
 from html_builder import build_master_reader
-from validate_outputs import validate
+from validate_outputs import validate_for_release
 from chapter_resolver import discover_chapters
 from audio_resolver import resolve_chapter_audio
 from run_manifest import update_manifest
@@ -157,7 +157,8 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         return 0, master_html_path
     if aligned_configs:
         report_path = os.path.join(book_dir, "reader_validation_report.json")
-        if validate(Path(book_dir), Path(report_path)) != 0:
+        report, release_token = validate_for_release(Path(book_dir), Path(report_path))
+        if release_token is None:
             update_manifest(book_dir, manifest_chapters, status="blocked")
             print(f"Release blocked. See {report_path}")
             return 0, master_html_path
@@ -167,7 +168,9 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
             book_subtitle=book_subtitle,
             book_author=book_author,
             chapters_config=aligned_configs,
-            output_html_path=master_html_path
+            output_html_path=master_html_path,
+            release_token=release_token,
+            release_report_path=report_path,
         )
         update_manifest(book_dir, manifest_chapters, status="released")
         print(f"Successfully generated/updated: {master_html_path}")

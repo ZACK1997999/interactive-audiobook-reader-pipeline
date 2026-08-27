@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "RENDER-001",
+      "failure": "Active-word highlighting changed font weight and caused horizontal jitter.",
+      "prevention": "Zero-Jitter CSS invariant forbids layout-changing highlight properties.",
+      "regression_tests": ["test_html_builder.py::test_zero_jitter_css_invariants"]
+    },
+    {
+      "id": "DATA-001",
+      "failure": "Empty translations or malformed vocabulary reached release validation.",
+      "prevention": "Release validation rejects empty translations and every malformed vocabulary entry.",
+      "regression_tests": ["test_release_gate.py::test_empty_translation_blocks_release", "test_release_gate.py::test_malformed_vocabulary_blocks_release"]
+    },
+    {
+      "id": "RELEASE-001",
+      "failure": "HTML could be compiled without an independent verified release authorization.",
+      "prevention": "The builder requires a validator-issued ReleaseToken bound to the report hash.",
+      "regression_tests": ["test_html_builder.py::test_html_builder_rejects_missing_release_authorization", "test_pipeline_safety.py::test_incomplete_analysis_blocks_compilation_and_records_manifest"]
+    },
+    {
+      "id": "ALIGN-001",
+      "failure": "Global alignment accepted weak or ambiguous matches as if they were validated.",
+      "prevention": "Weak matches require review and owner-approved exceptions remain in a review ledger.",
+      "regression_tests": ["test_alignment_evidence.py::test_weak_match_requires_review", "test_release_gate.py::test_owner_review_ledger_accepts_explicit_audio_exception"]
+    }
+  ]
+}

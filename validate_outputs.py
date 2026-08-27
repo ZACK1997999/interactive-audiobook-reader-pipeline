@@ -6,16 +6,64 @@ import re
 from pathlib import Path
 from audio_resolver import resolve_chapter_audio
 from artifact_io import atomic_write_json
+from release_token import issue_release_token
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
+ABBREVIATION_BEFORE_CAPITAL = re.compile(r"(?:Mrs|Mr|Ms|Dr|U\.S)$")
+
+
+def _suspicious_sentence_boundaries(text: str) -> list[str]:
+    """Return boundary matches after excluding whitelisted prose abbreviations."""
+    return [
+        match.group(0)
+        for match in MULTI_BOUNDARY.finditer(text)
+        if not ABBREVIATION_BEFORE_CAPITAL.search(text[:match.start()])
+    ]
 
 def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
     """Return true only when the shared resolver finds exactly one candidate."""
     return resolve_chapter_audio(audio_dir, number).status == "ok"
 
 
+def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, str], dict]:
+    """Load explicit owner decisions without changing the underlying evidence."""
+    path = book_dir / "reader_review_ledger.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        errors.append("reader_review_ledger.json: invalid JSON")
+        return {}
+    reviews = data.get("reviews") if isinstance(data, dict) else None
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(reviews, list):
+        errors.append("reader_review_ledger.json: invalid schema")
+        return {}
+    decisions = {}
+    for entry in reviews:
+        if not isinstance(entry, dict):
+            errors.append("reader_review_ledger.json: malformed review entry")
+            continue
+        chapter = entry.get("chapter")
+        sentence_ids = entry.get("sentence_ids")
+        if sentence_ids is None:
+            sentence_ids = [entry.get("sentence_id")]
+        required = (entry.get("decision"), entry.get("reviewer"), entry.get("evidence"))
+        if not isinstance(chapter, int) or not isinstance(sentence_ids, list) or not sentence_ids or any(not isinstance(item_id, str) or not item_id.strip() for item_id in sentence_ids) or not all(isinstance(value, str) and value.strip() for value in required) or entry.get("decision") != "accepted":
+            errors.append(f"reader_review_ledger.json: invalid review entry ({chapter})")
+            continue
+        for sentence_id in sentence_ids:
+            key = (chapter, sentence_id)
+            if key in decisions:
+                errors.append(f"reader_review_ledger.json: duplicate review entry ({chapter}/{sentence_id})")
+            decisions[key] = entry
+    return decisions
+
+
 def validate(book_dir: Path, report_path=None):
     errors, warnings, chapters = [], [], []
+    review_ledger = _load_review_ledger(book_dir, errors)
+    accepted_exceptions = []
     manifest_entries = {}
     manifest_path = book_dir / "reader_run_manifest.json"
     if manifest_path.exists():
@@ -42,7 +90,7 @@ def validate(book_dir: Path, report_path=None):
             errors.append(f"{label}: missing sentence ID")
         if len(ids) != len(set(ids)):
             errors.append(f"{label}: duplicate sentence IDs")
-        suspicious = [item.get("id") for item in data if not item.get("is_heading") and MULTI_BOUNDARY.search(item.get("text", ""))]
+        suspicious = [item.get("id") for item in data if not item.get("is_heading") and _suspicious_sentence_boundaries(item.get("text", "")) and (number, item.get("id")) not in review_ledger]
         if suspicious:
             warnings.append(f"{label}: {len(suspicious)} suspicious sentence boundaries ({', '.join(suspicious[:8])})")
         record = {"chapter": number, "canonical_records": len(data), "suspicious_records": len(suspicious)}
@@ -111,6 +159,9 @@ def validate(book_dir: Path, report_path=None):
             continue
 
         record["aligned_records"] = len(aligned_data)
+        record["aligned"] = str(aligned.relative_to(book_dir))
+        import hashlib
+        record["aligned_sha256"] = hashlib.sha256(aligned.read_bytes()).hexdigest()
         if len(aligned_data) != len(data):
             errors.append(f"{label}: canonical/aligned count mismatch")
         if [item.get("id") for item in aligned_data] != ids:
@@ -121,6 +172,9 @@ def validate(book_dir: Path, report_path=None):
         for item in aligned_data:
             item_id = item.get("id", "<unknown>")
             is_heading = item.get("is_heading", False)
+            owner_accepted = (number, item_id) in review_ledger
+            if owner_accepted:
+                accepted_exceptions.append({"chapter": number, "sentence_id": item_id, **review_ledger[(number, item_id)]})
             approved_non_monotonic = (
                 item.get("alignment_status") == "reviewed"
                 and item.get("alignment_reason") == "global_match_out_of_order"
@@ -130,7 +184,8 @@ def validate(book_dir: Path, report_path=None):
                 and not item.get("fallback_used")
                 and float(item.get("match_ratio", 0.0)) >= 0.5
             )
-            if not is_heading and (not item.get("word_spans") or not item.get("has_audio_match", True)):
+            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") == "non_narrated_content"
+            if not is_heading and not non_narrated and not owner_accepted and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
             start = float(item.get("raw_start", item.get("start", -1)))
             end = float(item.get("raw_end", item.get("end", -1)))
@@ -146,7 +201,7 @@ def validate(book_dir: Path, report_path=None):
             previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
-            if not is_heading and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or ratio < 0.5):
+            if not is_heading and not non_narrated and not owner_accepted and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or ratio < 0.5):
                 review_ids.append(item_id)
         record["review_required_records"] = len(review_ids)
         if review_ids:
@@ -156,12 +211,21 @@ def validate(book_dir: Path, report_path=None):
             record["status"] = "validated"
         chapters.append(record)
 
-    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
+    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "accepted_review_exceptions": accepted_exceptions, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if report_path:
         atomic_write_json(report_path, result)
     return 0 if result["release_ready"] else 1
+
+
+def validate_for_release(book_dir: Path, report_path: Path):
+    """Validate and return (report, token); a failed gate returns no token."""
+    code = validate(book_dir, report_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if code != 0:
+        return report, None
+    return report, issue_release_token(book_dir, report_path, report)
 
 
 def main():
