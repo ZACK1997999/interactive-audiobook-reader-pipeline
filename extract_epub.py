@@ -71,26 +71,47 @@ class ChapterParser(HTMLParser):
         self.current_attrs = {}
         self.current_text = []
         self.recording = False
+        self.in_figure = False
+        self.in_caption = False
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
-        if tag in ['h1', 'h2', 'h3', 'h4', 'p', 'blockquote', 'li']:
+        cls = attrs_dict.get("class", "").lower()
+
+        if tag in ["figure", "figcaption"]:
+            self.in_figure = True
+        if any(w in cls for w in ["caption", "photo", "credit", "illustr", "calibre_26"]):
+            self.in_caption = True
+
+        if tag == "img":
+            return
+
+        if tag in ["h1", "h2", "h3", "h4", "p", "blockquote", "li"]:
             self.current_tag = tag
             self.current_attrs = attrs_dict
             self.current_text = []
             self.recording = True
 
     def handle_endtag(self, tag):
+        if tag in ["figure", "figcaption"]:
+            self.in_figure = False
         if self.recording and tag == self.current_tag:
-            full_text = ''.join(self.current_text).strip()
-            if full_text:
+            full_text = "".join(self.current_text).strip()
+            cls = self.current_attrs.get("class", "").lower()
+            is_caption = (
+                self.in_caption or
+                self.in_figure or
+                any(w in cls for w in ["caption", "photo", "credit", "illustr", "calibre_26"])
+            )
+            if full_text and not is_caption:
                 self.elements.append({
-                    'tag': self.current_tag,
-                    'class': self.current_attrs.get('class', ''),
-                    'text': re.sub(r'\s+', ' ', full_text)
+                    "tag": self.current_tag,
+                    "class": self.current_attrs.get("class", ""),
+                    "text": re.sub(r"\s+", " ", full_text)
                 })
             self.recording = False
             self.current_tag = None
+            self.in_caption = False
 
     def handle_data(self, data):
         if self.recording:
