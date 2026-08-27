@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from artifact_io import atomic_write_json
@@ -41,16 +42,25 @@ def update_manifest(book_dir, chapters, status="in_progress", model="mlx-communi
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     except (OSError, subprocess.CalledProcessError):
         revision = None
+    existing = {}
+    output = Path(book_dir) / "reader_run_manifest.json"
+    if output.exists():
+        try:
+            existing = json.loads(output.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            existing = {}
     manifest = {
         "schema_version": 2,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": existing.get("run_id") or uuid.uuid4().hex,
+        "created_at": existing.get("created_at") or datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "pipeline_revision": revision,
         "acoustic_model": model,
         "status": status,
+        "source_files": existing.get("source_files", []),
+        "audio_files": existing.get("audio_files", []),
         "chapters": chapters,
     }
-    output = Path(book_dir) / "reader_run_manifest.json"
     atomic_write_json(output, manifest)
     return output
 

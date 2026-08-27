@@ -49,3 +49,19 @@ Out-of-order matches are valid only when the alignment evidence is strong and th
 been explicitly changed from `review-required` to `reviewed` with reason
 `global_match_out_of_order`. This separates canonical reading order from physical audio order
 without allowing automatic global matching to bypass review.
+
+## Publication verification
+
+Public audio is verified with a ranged `GET`, matching how HTML5 audio streams media. A `HEAD`
+request alone is not a sufficient release check because some public object endpoints reject `HEAD`
+while correctly serving byte ranges.
+
+```bash
+python3 publication_verify.py \
+  https://cdn.example/book/chapter_01.mp3 \
+  https://cdn.example/book/chapter_63.mp3
+```
+
+Keep R2/S3 credentials in the environment, OS keychain, or a secret manager. Never commit them to
+an uploader script, chat export, or repository. The public URL is safe to publish; write-access
+credentials are not.

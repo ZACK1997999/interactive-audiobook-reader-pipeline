@@ -35,5 +35,7 @@ py-modules = [
   "pipeline",
   "run_manifest",
   "artifact_io",
-  "validate_outputs"
+  "validate_outputs",
+  "manifests",
+  "publication_verify"
 ]

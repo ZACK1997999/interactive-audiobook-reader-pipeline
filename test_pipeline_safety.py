@@ -4,10 +4,21 @@ import unittest
 from pathlib import Path
 
 from artifact_io import atomic_write_json
-from pipeline import auto_discover_and_build
+from pipeline import _public_audio_url, auto_discover_and_build
 
 
 class PipelineSafetyTests(unittest.TestCase):
+    def test_public_audio_url_uses_canonical_one_based_chapters(self):
+        self.assertEqual(
+            _public_audio_url("https://cdn.example/", "the-housemaid", 0),
+            "https://cdn.example/the-housemaid/chapter_01.mp3",
+        )
+        self.assertEqual(
+            _public_audio_url("https://cdn.example", "the-housemaid", 63),
+            "https://cdn.example/the-housemaid/chapter_63.mp3",
+        )
+        self.assertIsNone(_public_audio_url("https://cdn.example", None, 1))
+
     def test_incomplete_analysis_blocks_compilation_and_records_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
