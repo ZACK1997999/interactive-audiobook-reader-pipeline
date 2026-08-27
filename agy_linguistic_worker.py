@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,29 +21,77 @@ PROMPT_PATH = Path(__file__).with_name("LINGUISTIC_ANALYSIS_PROMPT.md")
 CHUNK_SIZE = 50
 
 
-def _json_from_output(raw: str):
-    text = raw.strip()
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
-    if match:
-        extracted = match.group(1).strip()
-        try:
-            return json.loads(extracted)
-        except json.JSONDecodeError:
-            pass
-    if text.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", text)
-        cleaned = re.sub(r"\s*```$", "", cleaned).strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            pass
+def _json_from_output(text: str) -> Any:
+    cleaned = text.strip()
+    # 1. Extract from markdown code fences if present
+    if "```" in cleaned:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+        if match:
+            cleaned = match.group(1).strip()
+        else:
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+
+    # 2. Try direct parse
     try:
-        return json.loads(text)
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            return data
     except json.JSONDecodeError:
-        array_match = re.search(r"(\[\s*\{[\s\S]*\}\s*\])", text)
-        if array_match:
+        pass
+
+    # 3. Try regex array slice
+    array_match = re.search(r"(\[\s*\{[\s\S]*\}\s*\])", cleaned)
+    if array_match:
+        try:
             return json.loads(array_match.group(1))
-        raise
+        except json.JSONDecodeError:
+            cleaned = array_match.group(1)
+
+    # 4. Repair common JSON errors (missing commas between objects, trailing commas)
+    fixed = re.sub(r"\}\s*\{", "},{", cleaned)
+    fixed = re.sub(r",\s*(\]|\})", r"\1", fixed)
+    try:
+        data = json.loads(fixed)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # 5. Extract individual JSON objects by scanning curly brace depth
+    results = []
+    brace_depth = 0
+    start_idx = None
+    in_string = False
+    escape = False
+    for i, ch in enumerate(cleaned):
+        if ch == '"' and not escape:
+            in_string = not in_string
+        elif ch == '\\' and in_string:
+            escape = not escape
+            continue
+        elif not in_string:
+            if ch == '{':
+                if brace_depth == 0:
+                    start_idx = i
+                brace_depth += 1
+            elif ch == '}':
+                brace_depth -= 1
+                if brace_depth == 0 and start_idx is not None:
+                    obj_str = cleaned[start_idx:i + 1]
+                    obj_fixed = re.sub(r",\s*\}", "}", obj_str)
+                    try:
+                        obj = json.loads(obj_fixed)
+                        if isinstance(obj, dict) and "id" in obj:
+                            results.append(obj)
+                    except json.JSONDecodeError:
+                        pass
+                    start_idx = None
+        escape = False
+    if results:
+        return results
+
+    raise json.JSONDecodeError("Failed to parse valid JSON from output", text, 0)
 
 
 def chunk_sentences(sentences: list[dict], chunk_size: int = CHUNK_SIZE) -> list[list[dict]]:
@@ -97,6 +146,7 @@ def process_canonical_sentences(
     cwd: Path,
     chunk_size: int = CHUNK_SIZE,
     timeout: int = 3700,
+    max_batch_attempts: int = 3,
 ) -> list[dict]:
     chunks = chunk_sentences(canonical_data, chunk_size=chunk_size)
     if not chunks:
@@ -105,27 +155,45 @@ def process_canonical_sentences(
     master_list: list[dict] = []
     for batch_idx, batch in enumerate(chunks):
         prompt = build_batch_prompt(base_prompt, batch, batch_idx, len(chunks))
-        try:
-            completed = subprocess.run(
-                ["agy", "--mode", "plan", "--output-format", "text", "--print-timeout", "1h", "--print", prompt],
-                cwd=str(cwd),
-                text=True,
-                capture_output=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"agy timed out on batch {batch_idx + 1}/{len(chunks)}") from exc
-        if completed.returncode != 0:
-            error_msg = (completed.stderr or completed.stdout or "agy failed")[-4000:]
-            raise RuntimeError(f"agy failed on batch {batch_idx + 1}/{len(chunks)}: {error_msg}")
-        batch_result = _json_from_output(completed.stdout)
-        if not isinstance(batch_result, list):
-            raise RuntimeError(f"agy output for batch {batch_idx + 1} must be a JSON list")
-        if len(batch_result) != len(batch):
+        batch_success = False
+        last_error = ""
+
+        for attempt in range(1, max_batch_attempts + 1):
+            try:
+                completed = subprocess.run(
+                    ["agy", "--mode", "plan", "--output-format", "text", "--print-timeout", "1h", "--print", prompt],
+                    cwd=str(cwd),
+                    text=True,
+                    capture_output=True,
+                    timeout=timeout,
+                )
+                if completed.returncode != 0:
+                    last_error = (completed.stderr or completed.stdout or "agy failed")[-4000:]
+                    time.sleep(1)
+                    continue
+
+                batch_result = _json_from_output(completed.stdout)
+                if not isinstance(batch_result, list):
+                    last_error = "agy output must be a JSON list"
+                    time.sleep(1)
+                    continue
+
+                if len(batch_result) != len(batch):
+                    last_error = f"agy returned {len(batch_result)} items, expected {len(batch)}"
+                    time.sleep(1)
+                    continue
+
+                master_list.extend(batch_result)
+                batch_success = True
+                break
+            except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
+                last_error = str(exc)
+                time.sleep(1)
+
+        if not batch_success:
             raise RuntimeError(
-                f"agy output for batch {batch_idx + 1} returned {len(batch_result)} items, expected {len(batch)}"
+                f"agy failed on batch {batch_idx + 1}/{len(chunks)} after {max_batch_attempts} attempts: {last_error}"
             )
-        master_list.extend(batch_result)
 
     verify_analysis(master_list, canonical_data)
     return master_list
