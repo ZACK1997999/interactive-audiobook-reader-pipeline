@@ -47,10 +47,13 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
             'num': c['num'],
             'title': c['title'],
             'audio': c['audio'],
+            'public_audio': c.get('public_audio'),
             'sentences': sents
         })
         
     first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_00.mp3"
+    first_ch_public_audio = loaded_chapters[0].get('public_audio') if loaded_chapters else None
+    first_ch_num = loaded_chapters[0]['num'] if loaded_chapters else 0
     
     html_head = f"""<!DOCTYPE html>
 <html lang="en" data-theme="sepia">
@@ -545,7 +548,7 @@ body {{
         cnum = ch["num"]
         ctitle = ch["title"]
         label = "Preface" if cnum == 0 else f"Chapter {cnum}"
-        active_cls = " active" if cnum == 0 else ""
+        active_cls = " active" if cnum == first_ch_num else ""
         html_head += f"""        <div class="chapter-item{active_cls}" id="menu-ch-{cnum}" onclick="switchChapter({cnum})">
           <span class="chapter-item-tag">{label}</span>
           <span>{html.escape(ctitle)}</span>
@@ -562,13 +565,31 @@ body {{
   
   <div class="control-drawer" id="controlDrawer">
     <div class="drawer-inner">
-      <audio id="audioTrack" controls preload="metadata" src="{first_ch_audio}"></audio>
+      <audio id="audioTrack" controls preload="metadata"></audio>
       <div class="drawer-row">
         <div class="drawer-group">
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
           <button class="icon-btn" onclick="adjustFontSize(1)">A+</button>
           <button class="icon-btn" onclick="toggleTheme()">Theme</button>
           <button class="icon-btn" id="tipsToggleBtn" onclick="toggleTips()">Tips</button>
+        </div>
+        <div class="drawer-group">
+          <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
+            Speed
+            <select id="playbackRateSelect" onchange="setPlaybackRate(this.value)">
+              <option value="0.75">0.75x</option><option value="1" selected>1.0x</option>
+              <option value="1.25">1.25x</option><option value="1.5">1.5x</option>
+              <option value="1.75">1.75x</option><option value="2">2.0x</option>
+            </select>
+          </label>
+          <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
+            Repeat
+            <select id="shadowRepeatSelect" onchange="setShadowRepetitions(this.value)">
+              <option value="1">1x</option><option value="3" selected>3x</option><option value="5">5x</option>
+            </select>
+          </label>
+          <button class="icon-btn" id="shadowBtn" onclick="toggleShadowing()">R · Shadow</button>
+          <button class="icon-btn" onclick="exportCurrentAnkiCard()">Export Anki TSV</button>
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; display: flex; align-items: center; gap: 4px; color: var(--text-sub);">
@@ -584,6 +605,7 @@ body {{
           <div class="tips-item"><span class="tips-key">Spacebar</span> Toggle translation & vocabulary</div>
           <div class="tips-item"><span class="tips-key">← / ↑</span> Jump to previous sentence</div>
           <div class="tips-item"><span class="tips-key">→ / ↓</span> Jump to next sentence</div>
+          <div class="tips-item"><span class="tips-key">R</span> Start or stop sentence shadowing</div>
         </div>
       </div>
     </div>
@@ -597,13 +619,14 @@ body {{
         cnum = ch["num"]
         ctitle = ch["title"]
         caudio = ch["audio"]
+        cpublic_audio = ch.get("public_audio") or ""
         csents = ch["sentences"]
-        active_cls = " active" if cnum == 0 else ""
+        active_cls = " active" if cnum == first_ch_num else ""
         ch_heading_label = "PREFACE" if cnum == 0 else f"CHAPTER {cnum}"
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->
-  <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{caudio}" data-ch="{cnum}">
+  <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{html.escape(caudio)}" data-public-audio="{html.escape(cpublic_audio)}" data-ch="{cnum}">
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
       <h1 class="book-title">{ch_heading_label}<br>{html.escape(ctitle)}</h1>
@@ -621,6 +644,7 @@ body {{
             has_match = 1 if s.get("has_audio_match", True) and (end > start) else 0
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
+            raw_text = s.get("text", "")
             
             word_spans = s.get("word_spans", [])
             word_html_list = []
@@ -649,7 +673,7 @@ body {{
                 
             h_class = " chapter-heading-1" if is_h else ""
             html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}">
+      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
         <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
           <span class="s-content">{sentence_text_html}</span>
         </div>
@@ -670,6 +694,8 @@ body {{
 
 <script>
 window.__BOOK_ID__ = {book_id_json};
+window.__INITIAL_CHAPTER__ = {first_ch_num};
+window.__INITIAL_PUBLIC_AUDIO__ = {json.dumps(first_ch_public_audio)};
 const STORAGE_PREFIX = 'reader_' + (window.__BOOK_ID__ || 'default') + '_';
 """ + """
 const audio = document.getElementById('audioTrack');
@@ -679,10 +705,13 @@ const drawerToggleBtn = document.getElementById('drawerToggleBtn');
 const chapterDropdown = document.getElementById('chapterDropdown');
 const currentChapterLabel = document.getElementById('currentChapterLabel');
 
-let activeChapterNum = parseInt(localStorage.getItem(STORAGE_PREFIX + 'active_ch') || '0', 10);
+let activeChapterNum = parseInt(localStorage.getItem(STORAGE_PREFIX + 'active_ch') || String(window.__INITIAL_CHAPTER__), 10);
 let autoScrollEnabled = localStorage.getItem(STORAGE_PREFIX + 'autoscroll') !== 'false';
 let currentPlayingId = null;
 let currentActiveWordEl = null;
+let sentenceTimeIndex = [];
+let syncFrameId = null;
+const shadowState = { phase: 'idle', repetitions: 3, completed: 0, sentence: null, timer: null };
 
 document.getElementById('autoScrollCheck').checked = autoScrollEnabled;
 
@@ -703,6 +732,36 @@ function closeDropdowns(event) {
   }
 }
 
+function resolveAudioSource(section) {
+  const localSource = section.dataset.audio;
+  const publicSource = section.dataset.publicAudio;
+  return window.location.protocol === 'file:' || !publicSource ? localSource : publicSource;
+}
+
+function rebuildSentenceTimeIndex() {
+  const section = document.querySelector('.chapter-section.active');
+  sentenceTimeIndex = section ? Array.from(section.querySelectorAll('.sentence-unit[data-matched="1"]')).map(el => ({
+    start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), el
+  })).filter(item => item.end > item.start).sort((a, b) => a.start - b.start) : [];
+}
+
+function findSentenceAt(time) {
+  let low = 0;
+  let high = sentenceTimeIndex.length - 1;
+  let candidate = null;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const item = sentenceTimeIndex[middle];
+    if (item.start <= time) {
+      candidate = item;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return candidate && time < candidate.end ? candidate.el : null;
+}
+
 function switchChapter(chNum) {
   activeChapterNum = chNum;
   localStorage.setItem(STORAGE_PREFIX + 'active_ch', chNum);
@@ -717,7 +776,7 @@ function switchChapter(chNum) {
     sec.classList.remove('active');
     if (parseInt(sec.dataset.ch, 10) === chNum) {
       sec.classList.add('active');
-      const audioSrc = sec.dataset.audio;
+      const audioSrc = resolveAudioSource(sec);
       if (audio.getAttribute('src') !== audioSrc) {
         const wasPlaying = !audio.paused;
         audio.src = audioSrc;
@@ -730,13 +789,12 @@ function switchChapter(chNum) {
       }
     }
   });
+  rebuildSentenceTimeIndex();
   
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-if (activeChapterNum !== 0) {
-  switchChapter(activeChapterNum);
-}
+switchChapter(activeChapterNum);
 
 function toggleDrawer() {
   const isOpen = controlDrawer.classList.contains('open');
@@ -828,26 +886,107 @@ function toggleGlobalPlay() {
   }
 }
 
-audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; });
-audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; });
+function setPlaybackRate(value) {
+  const rate = Math.max(0.75, Math.min(2.0, parseFloat(value) || 1));
+  audio.playbackRate = rate;
+  audio.preservesPitch = true;
+  audio.mozPreservesPitch = true;
+  audio.webkitPreservesPitch = true;
+  localStorage.setItem(STORAGE_PREFIX + 'playback_rate', String(rate));
+}
+
+const savedPlaybackRate = localStorage.getItem(STORAGE_PREFIX + 'playback_rate') || '1';
+document.getElementById('playbackRateSelect').value = savedPlaybackRate;
+setPlaybackRate(savedPlaybackRate);
+
+function setShadowRepetitions(value) {
+  shadowState.repetitions = Math.max(1, parseInt(value, 10) || 3);
+}
+
+function stopShadowing() {
+  if (shadowState.timer) clearTimeout(shadowState.timer);
+  shadowState.phase = 'idle';
+  shadowState.completed = 0;
+  shadowState.sentence = null;
+  shadowState.timer = null;
+  document.getElementById('shadowBtn').textContent = 'R · Shadow';
+}
+
+function toggleShadowing() {
+  if (shadowState.phase !== 'idle') {
+    stopShadowing();
+    return;
+  }
+  const sentence = findSentenceAt(audio.currentTime) || document.getElementById(currentPlayingId);
+  if (!sentence || sentence.dataset.matched !== '1') return;
+  shadowState.phase = 'playing';
+  shadowState.completed = 0;
+  shadowState.sentence = sentence;
+  document.getElementById('shadowBtn').textContent = 'Stop Shadow';
+  audio.currentTime = parseFloat(sentence.dataset.start);
+  audio.play();
+}
+
+function advanceShadowing() {
+  if (shadowState.phase === 'idle' || !shadowState.sentence) return;
+  const end = parseFloat(shadowState.sentence.dataset.end);
+  if (audio.currentTime < end) return;
+  audio.pause();
+  shadowState.completed += 1;
+  if (shadowState.completed >= shadowState.repetitions) {
+    stopShadowing();
+    return;
+  }
+  shadowState.phase = 'pause_buffer';
+  shadowState.timer = setTimeout(() => {
+    if (!shadowState.sentence) return;
+    shadowState.phase = 'replaying';
+    audio.currentTime = parseFloat(shadowState.sentence.dataset.start);
+    audio.play();
+  }, 650);
+}
+
+function tsvField(value) {
+  return String(value || '').replace(/[\\t\\r\\n]+/g, ' ').trim();
+}
+
+function exportCurrentAnkiCard() {
+  const sentence = findSentenceAt(audio.currentTime) || document.getElementById(currentPlayingId);
+  if (!sentence) return;
+  let vocabulary = [];
+  try { vocabulary = JSON.parse(sentence.dataset.vocab || '[]'); } catch (_) { vocabulary = []; }
+  const vocabText = vocabulary.map(item => [item.word, item.pos, item.def].filter(Boolean).join(' · ')).join(' | ');
+  const front = '[背景]。你说：“' + tsvField(sentence.dataset.text) + '”';
+  const row = [front, tsvField(sentence.dataset.trans), tsvField(vocabText), window.__BOOK_ID__, sentence.id].join('\\t');
+  const blob = new Blob(['\\ufeff' + row + '\\n'], { type: 'text/tab-separated-values;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = window.__BOOK_ID__ + '-' + sentence.id + '-anki.tsv';
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function startSyncLoop() {
+  if (syncFrameId === null && !audio.paused && !document.hidden) syncFrameId = requestAnimationFrame(syncPlayback);
+}
+
+function stopSyncLoop() {
+  if (syncFrameId !== null) cancelAnimationFrame(syncFrameId);
+  syncFrameId = null;
+}
+
+audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; startSyncLoop(); });
+audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; stopSyncLoop(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopSyncLoop(); else startSyncLoop(); });
 
 function syncPlayback() {
+  syncFrameId = null;
   if (!audio.paused) {
     const curTime = audio.currentTime;
     const activeSection = document.querySelector('.chapter-section.active');
     
     if (activeSection) {
-      const sentenceUnits = activeSection.querySelectorAll('.sentence-unit[data-matched="1"]');
-      let activeUnit = null;
-      
-      for (let u of sentenceUnits) {
-        const s = parseFloat(u.dataset.start);
-        const e = parseFloat(u.dataset.end);
-        if (curTime >= s && curTime < e) {
-          activeUnit = u;
-          break;
-        }
-      }
+      const activeUnit = findSentenceAt(curTime);
       
       if (activeUnit) {
         if (activeUnit.id !== currentPlayingId) {
@@ -886,11 +1025,12 @@ function syncPlayback() {
         }
       }
     }
+    advanceShadowing();
   }
-  requestAnimationFrame(syncPlayback);
+  startSyncLoop();
 }
 
-requestAnimationFrame(syncPlayback);
+rebuildSentenceTimeIndex();
 
 function handleSearch() {
   const query = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -925,6 +1065,12 @@ window.addEventListener('keydown', (e) => {
   if (units.length === 0) return;
   
   const curTime = audio.currentTime;
+
+  if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    toggleShadowing();
+    return;
+  }
   
   let currentIndex = units.findIndex(u => {
     const s = parseFloat(u.dataset.start);

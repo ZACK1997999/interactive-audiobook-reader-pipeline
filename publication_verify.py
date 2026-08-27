@@ -4,7 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List
+from typing import Callable, Iterable, List
 from urllib.request import Request, urlopen
 
 
@@ -18,7 +18,7 @@ class AudioCheck:
 
     @property
     def ok(self) -> bool:
-        return self.status in (200, 206) and self.bytes_read > 0 and self.content_type.startswith("audio/")
+        return self.status == 206 and self.bytes_read > 0 and self.content_type.startswith("audio/") and bool(self.content_range)
 
 
 def check_audio_url(url: str, probe_bytes: int = 16) -> AudioCheck:
@@ -48,6 +48,37 @@ def verify_audio_urls(urls: Iterable[str]) -> List[AudioCheck]:
             results.append(check_audio_url(url))
         except Exception:
             results.append(AudioCheck(url, 0, "", "", 0))
+    return results
+
+
+def probe_audio_ranges(url: str, size: int, opener: Callable = urlopen, probe_bytes: int = 16) -> List[AudioCheck]:
+    """Strictly verify beginning, middle, and end byte ranges for seekability."""
+    if size <= 0:
+        raise ValueError("audio size must be positive")
+    width = min(probe_bytes, size)
+    starts = sorted({0, max(0, (size - width) // 2), max(0, size - width)})
+    results = []
+    for start in starts:
+        end = min(size - 1, start + width - 1)
+        request = Request(url, headers={
+            "Range": f"bytes={start}-{end}",
+            "User-Agent": "immersive-reader-release-verifier/2.0",
+        })
+        with opener(request, timeout=30) as response:
+            body = response.read(width)
+            result = AudioCheck(
+                url=url, status=response.status,
+                content_type=response.headers.get("Content-Type", ""),
+                content_range=response.headers.get("Content-Range", ""),
+                bytes_read=len(body),
+            )
+        expected_range = f"bytes {start}-{end}/{size}"
+        if result.status != 206 or result.content_range != expected_range or result.bytes_read != end - start + 1:
+            raise RuntimeError(
+                f"range probe failed for {url}: requested bytes={start}-{end}, "
+                f"received {result.status} {result.content_range!r} ({result.bytes_read} bytes)"
+            )
+        results.append(result)
     return results
 
 

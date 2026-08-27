@@ -6,10 +6,21 @@ import unittest
 from pathlib import Path
 
 from artifact_io import atomic_write_json
-from industrial_orchestrator import run, run_orchestrator
+from industrial_orchestrator import _attach_intake_plan, run, run_orchestrator
 
 
 class IndustrialOrchestratorTests(unittest.TestCase):
+    def test_approved_group_mapping_is_attached_to_worker_rows(self):
+        rows = [{"chapter": 1}, {"chapter": 2}]
+        plan = {
+            "audio": [{"path": "/audio/combined.mp3"}],
+            "mappings": [{"kind": "match", "chapter_indices": [0, 1], "audio_indices": [0]}],
+        }
+        _attach_intake_plan(rows, plan)
+        self.assertEqual(rows[0]["audio"], "/audio/combined.mp3")
+        self.assertEqual(rows[1]["audio_sources"], ["/audio/combined.mp3"])
+        self.assertEqual(rows[1]["audio_mapping_status"], "approved")
+
     def test_dry_run_persists_resumable_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -70,12 +81,26 @@ class IndustrialOrchestratorTests(unittest.TestCase):
             atomic_write_json(root / "demo_ch01_canonical_sentences.json", [{"id": "s-1", "text": "A sentence."}])
             state = root / "state.json"
             failing_cmd = f"{sys.executable} -c 'import sys; sys.exit(1)'"
-            self.assertEqual(run(root, state, linguistic_command=failing_cmd, max_attempts=2), 1)
+            self.assertEqual(run(
+                root, state, linguistic_command=failing_cmd, max_attempts=2,
+                unsafe_allow_unapproved_workers=True,
+            ), 1)
             data = json.loads(state.read_text())
             self.assertEqual(data["status"], "blocked")
             self.assertEqual(data["chapters"]["1"]["status"], "linguistic_failed")
             self.assertEqual(data["chapters"]["1"]["attempts"]["linguistic"], 2)
             self.assertEqual(len(data["chapters"]["1"]["failures"]), 2)
+
+    def test_worker_is_blocked_without_approved_intake_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            atomic_write_json(root / "demo_ch01_canonical_sentences.json", [{"id": "s-1", "text": "A sentence."}])
+            state = root / "state.json"
+            command = f"{sys.executable} -c 'raise SystemExit(0)'"
+            self.assertEqual(run(root, state, linguistic_command=command), 1)
+            data = json.loads(state.read_text())
+            self.assertEqual(data["current_stage"], "intake_gate")
+            self.assertIn("intake_plan.json", json.dumps(data))
 
     def test_natural_sorting_of_audio_files(self):
         with tempfile.TemporaryDirectory() as tmp:

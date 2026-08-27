@@ -19,6 +19,8 @@ This workspace contains a reusable toolchain for turning prepared chapter artifa
 | [`acoustic_whisper.py`](acoustic_whisper.py) | **Acoustic Engine**: Runs MLX Whisper for word-level timestamps. |
 | [`dynamic_aligner.py`](dynamic_aligner.py) | **Alignment Engine**: Global matching with evidence-bearing word spans. |
 | [`html_builder.py`](html_builder.py) | **Static HTML Compiler**: Builds the multi-chapter interactive reader. |
+| [`intake_reconciler.py`](intake_reconciler.py) | **P2 Intake Contract**: Parses EPUB structure, reconciles acoustic anchors, and enforces hash-bound human approval. |
+| [`publisher.py`](publisher.py) | **P2 Publication Protocol**: Resumes journaled archive/R2/Git/HTTP verification without duplicate work. |
 | [`audio_resolver.py`](audio_resolver.py) | **Audio Contract**: Resolves exactly one explicit chapter audio candidate. |
 | [`models.py`](models.py) | **Stable Internal Contracts**: Backend-neutral domain models introduced in Phase 1. |
 | [`contract_adapters.py`](contract_adapters.py) | **Compatibility Adapters**: Converts current JSON artifacts to and from internal models. |
@@ -99,7 +101,20 @@ Then provide separately reviewed linguistic and acoustic worker commands. A work
 `READER_CANONICAL_PATH`/`READER_AUDIO_PATH` and writes the contract file at `READER_OUTPUT_PATH`.
 Failed workers are retried up to `--max-attempts`; publication is not a coordinator stage.
 
-The repository includes the default adapters:
+Before any configured worker may run, P2 requires an approved `intake_plan.json`. Generate the
+cheap head/tail acoustic probes with the selected acoustic backend, then build and review the
+plan:
+
+```bash
+reader-intake --epub /path/book.epub --audio-dir /path/audio \
+  --probes /path/acoustic_probes.json --output /path/book/intake_plan.json
+reader-intake --approve /path/book/intake_plan.json
+reader-intake --verify /path/book/intake_plan.json
+```
+
+Approval is bound to the complete plan plus the SHA-256 of the EPUB and every audio source.
+Changing any input closes the gate. Plans below the configured confidence threshold cannot be
+approved. The repository includes the default worker adapters:
 
 ```bash
 python3 industrial_orchestrator.py \
@@ -110,6 +125,27 @@ python3 industrial_orchestrator.py \
 
 These adapters fail closed when `agy` or MLX cannot start, so a missing model, authentication
 failure, or hardware problem becomes a resumable blocker instead of a fabricated artifact.
+
+### P2 Reader and Publication
+
+`html_builder.py` now emits one dual-mode reader: `file://` uses the local audio path while HTTP
+uses the chapter's public CDN path. Sentence synchronization uses a per-chapter binary-search
+index and suspends animation frames while paused or hidden. Native pitch-preserving speed,
+sentence shadowing (`R`), and UTF-8 Anki TSV export are built into that same compiler.
+
+Install publication support and run the reviewed JSON configuration:
+
+```bash
+python3 -m pip install -e '.[deployment]'
+reader-publish /path/publisher_config.json
+```
+
+The publisher records `preflight -> archive -> r2_upload -> remote_verify -> git_stage ->
+git_push -> smoke_test` in `publisher_journal.json`. R2 objects are skipped only when their
+stored SHA-256 metadata matches. Every public audio object must return exact HTTP 206 ranges at
+its beginning, middle, and end before the publisher creates a whitelisted Git commit. The portal
+must load `manifest.json` as its single data source; a remaining `INLINE_MANIFEST` blocks
+preflight.
 
 ### 1-Line AI Instruction (Recommended)
 Simply say:

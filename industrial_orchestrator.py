@@ -24,6 +24,7 @@ from typing import Dict, Iterable, List, Optional
 
 from artifact_io import atomic_write_json
 from chapter_resolver import discover_chapters
+from intake_reconciler import verify_gate
 
 
 SCHEMA_VERSION = 1
@@ -142,6 +143,22 @@ def _attach_audio_mapping(book_dir: Path, rows: List[Dict]) -> None:
         )
 
 
+def _attach_intake_plan(rows: List[Dict], plan: Dict) -> None:
+    """Apply reconciled audio groups to canonical chapters in deterministic order."""
+    audio = plan.get("audio", [])
+    for mapping in plan.get("mappings", []):
+        if mapping.get("kind") != "match":
+            continue
+        sources = [audio[index]["path"] for index in mapping.get("audio_indices", [])]
+        for chapter_index in mapping.get("chapter_indices", []):
+            if chapter_index >= len(rows):
+                raise RuntimeError("intake plan chapter index exceeds discovered canonical chapters")
+            rows[chapter_index]["audio_sources"] = sources
+            if sources:
+                rows[chapter_index]["audio"] = sources[0]
+            rows[chapter_index]["audio_mapping_status"] = "approved"
+
+
 def _worker_command(raw: Optional[str]) -> Optional[List[str]]:
     return shlex.split(raw) if raw else None
 
@@ -188,6 +205,7 @@ def _run_worker(stage: str, row: Dict, command: List[str], state: Dict, state_pa
         "READER_CANONICAL_PATH": row["canonical"],
         "READER_OUTPUT_PATH": str(output),
         "READER_AUDIO_PATH": row.get("audio", ""),
+        "READER_AUDIO_PATHS_JSON": json.dumps(row.get("audio_sources", [row.get("audio", "")])),
     })
     for attempt in range(record["attempts"].get(stage, 0) + 1, max_attempts + 1):
         record["attempts"][stage] = attempt
@@ -216,7 +234,9 @@ def _run_worker(stage: str, row: Dict, command: List[str], state: Dict, state_pa
 
 
 def run(book_dir: Path, state_path: Path, linguistic_command: Optional[str] = None,
-        acoustic_command: Optional[str] = None, max_attempts: int = 2, dry_run: bool = False) -> int:
+        acoustic_command: Optional[str] = None, max_attempts: int = 2, dry_run: bool = False,
+        intake_plan_path: Optional[Path] = None,
+        unsafe_allow_unapproved_workers: bool = False) -> int:
     book_dir = Path(book_dir).resolve()
     state_path = Path(state_path).resolve()
     with _book_run_lock(book_dir):
@@ -244,6 +264,27 @@ def run(book_dir: Path, state_path: Path, linguistic_command: Optional[str] = No
             state["current_stage"] = None
             _save_state(state_path, state)
             return 0
+
+        if (linguistic_command or acoustic_command) and not unsafe_allow_unapproved_workers:
+            gate_path = Path(intake_plan_path or (book_dir / "intake_plan.json")).resolve()
+            try:
+                approved_plan = verify_gate(gate_path)
+            except Exception as exc:
+                state["status"] = "blocked"
+                state["current_stage"] = "intake_gate"
+                _event(state, "blocked", stage="intake_gate", reason=str(exc))
+                _save_state(state_path, state)
+                return 1
+            state["intake_gate"] = {
+                "status": "passed",
+                "plan_path": str(gate_path),
+                "plan_sha256": approved_plan["plan_sha256"],
+                "minimum_confidence": approved_plan["minimum_confidence"],
+            }
+            _attach_intake_plan(rows, approved_plan)
+            _set_chapters(state, rows)
+            _event(state, "intake_gate_passed", plan_sha256=approved_plan["plan_sha256"])
+            _save_state(state_path, state)
 
         for stage, raw_command in (("linguistic", linguistic_command), ("acoustic", acoustic_command)):
             state["current_stage"] = stage
@@ -290,9 +331,18 @@ def main() -> int:
     parser.add_argument("--acoustic-command", help="Worker command; receives READER_* environment variables")
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--intake-plan", type=Path, help="Approved hash-bound intake plan (defaults to BOOK_DIR/intake_plan.json)")
+    parser.add_argument(
+        "--unsafe-allow-unapproved-workers", action="store_true",
+        help="Emergency legacy escape hatch; permits costly workers without the P2 intake gate",
+    )
     args = parser.parse_args()
     state = args.state or args.book_dir / "industrial_run_state.json"
-    return run(args.book_dir, state, args.linguistic_command, args.acoustic_command, max(1, args.max_attempts), args.dry_run)
+    return run(
+        args.book_dir, state, args.linguistic_command, args.acoustic_command,
+        max(1, args.max_attempts), args.dry_run, args.intake_plan,
+        args.unsafe_allow_unapproved_workers,
+    )
 
 
 if __name__ == "__main__":

@@ -35,8 +35,12 @@ def _json_from_output(text: str) -> Any:
     # 2. Try direct parse
     try:
         data = json.loads(cleaned)
+        # Preserve a successfully parsed non-list value so the caller can emit
+        # the precise contract error instead of misreporting valid JSON as a
+        # parse failure after its repair fallbacks are exhausted.
         if isinstance(data, list):
             return data
+        return data
     except json.JSONDecodeError:
         pass
 
@@ -207,7 +211,10 @@ def process_canonical_sentences(
                     missing_items = [item for item in batch if item["id"] not in returned_map]
 
                 if missing_items:
-                    last_error = f"agy missed {len(missing_items)} items: {[m['id'] for m in missing_items]}"
+                    last_error = (
+                        f"agy returned {len(returned_map)} items, expected {len(batch)}; "
+                        f"missed {len(missing_items)} items: {[m['id'] for m in missing_items]}"
+                    )
                     time.sleep(1)
                     continue
 

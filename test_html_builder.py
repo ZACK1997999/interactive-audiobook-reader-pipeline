@@ -148,3 +148,42 @@ class HTMLBuilderTests(unittest.TestCase):
                     release_token=None, release_report_path=tmp_path / "missing.json",
                 )
             self.assertIn("ReleaseToken", str(ctx.exception))
+
+    def test_p2_reader_uses_binary_sync_and_sleeps_when_paused(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            output = tmp_path / "reader.html"
+            token, report_path = _make_release_token(tmp_path)
+            build_master_reader(
+                "Test", "Study", "Author", [{
+                    "num": 1, "title": "One", "audio": "./audio/chapter_01.mp3",
+                    "public_audio": "https://cdn.example/book/chapter_01.mp3",
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
+                }], str(output), release_token=token, release_report_path=report_path,
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn("function findSentenceAt(time)", rendered)
+            self.assertIn("while (low <= high)", rendered)
+            self.assertNotIn("for (let u of sentenceUnits)", rendered)
+            self.assertIn("cancelAnimationFrame(syncFrameId)", rendered)
+            self.assertIn("document.addEventListener('visibilitychange'", rendered)
+            self.assertIn("data-public-audio=\"https://cdn.example/book/chapter_01.mp3\"", rendered)
+
+    def test_p2_reader_has_native_speed_shadowing_and_anki_tsv(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            output = tmp_path / "reader.html"
+            token, report_path = _make_release_token(tmp_path)
+            build_master_reader(
+                "Test", "Study", "Author", [{
+                    "num": 1, "title": "One", "audio": "./audio/chapter_01.mp3",
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
+                }], str(output), release_token=token, release_report_path=report_path,
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn("audio.playbackRate = rate", rendered)
+            self.assertIn("audio.preservesPitch = true", rendered)
+            for state in ("'idle'", "'playing'", "'pause_buffer'", "'replaying'"):
+                self.assertIn(state, rendered)
+            self.assertIn("text/tab-separated-values;charset=utf-8", rendered)
+            self.assertIn("'[背景]。你说：“'", rendered)

@@ -270,7 +270,8 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
             aligned_configs.append({
                 "num": ch_num,
                 "title": title,
-                "audio": audio_file_rel,
+                "audio": f"./audio/{os.path.basename(audio_file)}" if audio_file else audio_file_rel,
+                "public_audio": public_audio_url,
                 "aligned_json": aligned_path
             })
             
