@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from validate_outputs import _chapter_audio_exists, validate
+from validate_outputs import _chapter_audio_exists, _suspicious_sentence_boundaries, validate
 from dynamic_aligner import align_sentences_with_audio
 from pipeline import _find_chapter_audio
 
@@ -135,6 +135,11 @@ class ReleaseGateTests(unittest.TestCase):
             self.assertIsNone(_find_chapter_audio(str(root / "audio"), 1))
             self.assertFalse(_chapter_audio_exists(root / "audio", 1))
             self.assertNotEqual(validate(root), 0)
+
+    def test_common_abbreviations_do_not_trigger_boundary_warning(self):
+        self.assertEqual(_suspicious_sentence_boundaries("Mrs. Winchester asked Dr. Hewitt.") , [])
+        self.assertEqual(_suspicious_sentence_boundaries("A Guide to U.S. Prisons."), [])
+        self.assertTrue(_suspicious_sentence_boundaries("The door opened. Millie stepped inside."))
 
 
 if __name__ == "__main__":

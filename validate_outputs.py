@@ -9,6 +9,16 @@ from artifact_io import atomic_write_json
 from release_token import issue_release_token
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
+ABBREVIATION_BEFORE_CAPITAL = re.compile(r"(?:Mrs|Mr|Ms|Dr|U\.S)$")
+
+
+def _suspicious_sentence_boundaries(text: str) -> list[str]:
+    """Return boundary matches after excluding whitelisted prose abbreviations."""
+    return [
+        match.group(0)
+        for match in MULTI_BOUNDARY.finditer(text)
+        if not ABBREVIATION_BEFORE_CAPITAL.search(text[:match.start()])
+    ]
 
 def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
     """Return true only when the shared resolver finds exactly one candidate."""
@@ -80,7 +90,7 @@ def validate(book_dir: Path, report_path=None):
             errors.append(f"{label}: missing sentence ID")
         if len(ids) != len(set(ids)):
             errors.append(f"{label}: duplicate sentence IDs")
-        suspicious = [item.get("id") for item in data if not item.get("is_heading") and MULTI_BOUNDARY.search(item.get("text", "")) and (number, item.get("id")) not in review_ledger]
+        suspicious = [item.get("id") for item in data if not item.get("is_heading") and _suspicious_sentence_boundaries(item.get("text", "")) and (number, item.get("id")) not in review_ledger]
         if suspicious:
             warnings.append(f"{label}: {len(suspicious)} suspicious sentence boundaries ({', '.join(suspicious[:8])})")
         record = {"chapter": number, "canonical_records": len(data), "suspicious_records": len(suspicious)}
