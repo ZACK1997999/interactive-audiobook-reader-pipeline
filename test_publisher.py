@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from artifact_io import atomic_write_json
-from publisher import STEPS, publish, update_library_manifest
+from publisher import STEPS, publish, resolve_manifest_entry, update_library_manifest
 
 
 def _config(root: Path):
@@ -75,6 +75,22 @@ class PublisherTests(unittest.TestCase):
             data = json.loads(path.read_text())
             self.assertEqual([book["id"] for book in data["books"]], ["book", "other"])
             self.assertEqual(data["books"][0]["title"], "New")
+
+    def test_shelf_metadata_derives_chapter_count_and_audio_duration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = _config(root)
+            Path(config["reader_html"]).write_text(
+                '<section class="chapter-section active" id="chapter-1"></section>'
+                '<section class="chapter-section" id="chapter-2"></section>'
+            )
+            audio_manifest = json.loads(Path(config["audio_manifest"]).read_text())
+            audio_manifest["entries"][0]["duration"] = 3720
+            atomic_write_json(Path(config["audio_manifest"]), audio_manifest)
+            entry = resolve_manifest_entry(config)
+            self.assertEqual(entry["chaptersCount"], 2)
+            self.assertEqual(entry["totalDuration"], "1h 02m")
+            self.assertEqual(entry["readerUrl"], "books/book/index.html")
 
 
 if __name__ == "__main__":

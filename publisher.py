@@ -15,11 +15,13 @@ import os
 import shutil
 import subprocess
 import time
+import re
 from pathlib import Path
 from typing import Callable, Dict, Optional
 from urllib.request import Request, urlopen
 
 from artifact_io import atomic_write_json
+from intake_reconciler import verify_gate
 from publication_verify import probe_audio_ranges
 from r2_upload import sync_manifest
 
@@ -42,13 +44,52 @@ def _now() -> str:
 
 def _release_fingerprint(config: Dict) -> str:
     records = {"book_id": config["book_id"]}
-    for key in ("reader_html", "audio_manifest", "cover"):
+    for key in ("reader_html", "audio_manifest", "cover", "intake_plan"):
         if config.get(key):
             path = Path(config[key]).expanduser().resolve()
             records[key] = {"path": str(path), "sha256": _sha256(path) if path.is_file() else None}
-    records["manifest_entry"] = config.get("manifest_entry", {})
+    records["manifest_entry"] = resolve_manifest_entry(config)
     encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _format_duration(seconds: float) -> str:
+    minutes = int(round(max(0.0, seconds) / 60))
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+
+
+def resolve_manifest_entry(config: Dict) -> Dict:
+    """Fill deterministic shelf fields from the reader and approved intake evidence."""
+    entry = dict(config.get("manifest_entry") or {})
+    book_id = config.get("book_id")
+    if not book_id:
+        return entry
+    entry["id"] = book_id
+    entry.setdefault("cover", f"assets/covers/{book_id}.jpg")
+    entry.setdefault("readerUrl", f"books/{book_id}/index.html")
+
+    reader_path = Path(config.get("reader_html", "")).expanduser()
+    if "chaptersCount" not in entry and reader_path.is_file():
+        reader_text = reader_path.read_text(encoding="utf-8")
+        entry["chaptersCount"] = len(re.findall(r'<section class="chapter-section[^>]*\bid="chapter-', reader_text))
+
+    duration = None
+    if config.get("intake_plan"):
+        plan = verify_gate(Path(config["intake_plan"]))
+        used_indices = {
+            index
+            for mapping in plan.get("mappings", []) if mapping.get("kind") == "match"
+            for index in mapping.get("audio_indices", [])
+        }
+        duration = sum(float(plan["audio"][index].get("duration", 0.0)) for index in used_indices)
+    elif config.get("audio_manifest") and Path(config["audio_manifest"]).is_file():
+        audio_data = json.loads(Path(config["audio_manifest"]).read_text(encoding="utf-8"))
+        if audio_data.get("entries") and all("duration" in item for item in audio_data["entries"]):
+            duration = sum(float(item["duration"]) for item in audio_data["entries"])
+    if "totalDuration" not in entry and duration is not None:
+        entry["totalDuration"] = _format_duration(duration)
+    return entry
 
 
 def _load_journal(path: Path, fingerprint: str, book_id: str) -> Dict:
@@ -163,11 +204,16 @@ def _preflight(config: Dict, context: Dict) -> Dict:
             raise RuntimeError(f"audio source missing or changed: {source}")
         if not entry.get("public_url") or not entry.get("bytes"):
             raise ValueError(f"audio entry lacks public_url/bytes: {entry.get('object_key')}")
+    shelf_entry = resolve_manifest_entry(config)
+    missing_shelf = [key for key in ("title", "author", "chaptersCount", "totalDuration") if not shelf_entry.get(key)]
+    if missing_shelf:
+        raise ValueError("incomplete derived shelf metadata: " + ", ".join(missing_shelf))
     if _changed_paths(repo):
         raise RuntimeError("portal repository must be clean before publication")
     return {
         "reader_sha256": _sha256(reader), "audio_entries": len(entries),
         "portal_repo": str(repo), "base_commit": _git(repo, "rev-parse", "HEAD").stdout.strip(),
+        "shelf_entry": shelf_entry,
     }
 
 
@@ -224,7 +270,7 @@ def _git_stage(config: Dict, context: Dict) -> Dict:
         cover_source = Path(config["cover"]).expanduser().resolve()
         cover_destination = repo / "assets" / "covers" / f"{book_id}.jpg"
         _prepare_cover(cover_source, cover_destination)
-    update_library_manifest(repo / "manifest.json", config["manifest_entry"])
+    update_library_manifest(repo / "manifest.json", resolve_manifest_entry(config))
     _git(repo, "add", "--", *(str(path) for path in whitelist))
     staged_check = subprocess.run(
         ["git", "diff", "--cached", "--quiet"], cwd=str(repo),

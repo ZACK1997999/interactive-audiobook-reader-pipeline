@@ -140,6 +140,10 @@ python3 -m pip install -e '.[deployment]'
 reader-publish /path/publisher_config.json
 ```
 
+Start from [`publisher_config.example.json`](publisher_config.example.json). The publisher derives
+`chaptersCount`, `totalDuration`, the cover path, and the reader path from the compiled reader and
+approved intake/audio evidence, so shelf registration does not duplicate those computed fields.
+
 The publisher records `preflight -> archive -> r2_upload -> remote_verify -> git_stage ->
 git_push -> smoke_test` in `publisher_journal.json`. R2 objects are skipped only when their
 stored SHA-256 metadata matches. Every public audio object must return exact HTTP 206 ranges at
