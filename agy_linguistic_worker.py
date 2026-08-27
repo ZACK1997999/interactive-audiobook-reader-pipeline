@@ -178,12 +178,41 @@ def process_canonical_sentences(
                     time.sleep(1)
                     continue
 
-                if len(batch_result) != len(batch):
-                    last_error = f"agy returned {len(batch_result)} items, expected {len(batch)}"
+                returned_map = {
+                    item.get("id"): item
+                    for item in batch_result
+                    if isinstance(item, dict) and "id" in item
+                }
+                missing_items = [item for item in batch if item["id"] not in returned_map]
+
+                # Auto-heal missing sentences via a targeted sub-query
+                if missing_items and len(missing_items) <= 10:
+                    sub_prompt = build_batch_prompt(base_prompt, missing_items, 0, 1)
+                    try:
+                        sub_completed = subprocess.run(
+                            ["agy", "--mode", "plan", "--output-format", "text", "--print-timeout", "1h", "--print", sub_prompt],
+                            cwd=str(cwd),
+                            text=True,
+                            capture_output=True,
+                            timeout=timeout,
+                        )
+                        if sub_completed.returncode == 0:
+                            sub_result = _json_from_output(sub_completed.stdout)
+                            if isinstance(sub_result, list):
+                                for s_item in sub_result:
+                                    if isinstance(s_item, dict) and "id" in s_item:
+                                        returned_map[s_item["id"]] = s_item
+                    except Exception:
+                        pass
+                    missing_items = [item for item in batch if item["id"] not in returned_map]
+
+                if missing_items:
+                    last_error = f"agy missed {len(missing_items)} items: {[m['id'] for m in missing_items]}"
                     time.sleep(1)
                     continue
 
-                master_list.extend(batch_result)
+                healed_batch = [returned_map[item["id"]] for item in batch]
+                master_list.extend(healed_batch)
                 batch_success = True
                 break
             except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
