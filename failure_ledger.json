@@ -24,6 +24,24 @@
       "failure": "Global alignment accepted weak or ambiguous matches as if they were validated.",
       "prevention": "Weak matches require review and owner-approved exceptions remain in a review ledger.",
       "regression_tests": ["test_alignment_evidence.py::test_weak_match_requires_review", "test_release_gate.py::test_owner_review_ledger_accepts_explicit_audio_exception"]
+    },
+    {
+      "id": "AUDIO-001",
+      "failure": "Local source filenames, reader URLs, and cloud object names diverged during publication.",
+      "prevention": "AudioManifest records one explicit chapter-to-source-to-object mapping and publication uses browser-compatible range verification.",
+      "regression_tests": ["test_manifests.py::test_audio_manifest_is_explicit_and_hashed", "test_publication_verify.py::test_verifier_uses_audio_range_probe"]
+    },
+    {
+      "id": "RUN-001",
+      "failure": "A resumable run could lose its identity when the manifest was updated between stages.",
+      "prevention": "Run manifests preserve run_id and created_at across stage updates.",
+      "regression_tests": ["test_manifests.py::test_run_manifest_preserves_run_identity"]
+    },
+    {
+      "id": "SEC-001",
+      "failure": "Cloud credentials were embedded in a temporary uploader script and upload scope was inferred from hardcoded tasks.",
+      "prevention": "R2 uploads require environment-only credentials and an explicit manifest; dry-run validates the complete scope before transfer.",
+      "regression_tests": ["test_r2_upload.py::test_dry_run_requires_all_manifest_files_and_credentials", "test_r2_upload.py::test_missing_credentials_are_rejected_before_upload"]
     }
   ]
 }

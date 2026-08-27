@@ -49,3 +49,35 @@ Out-of-order matches are valid only when the alignment evidence is strong and th
 been explicitly changed from `review-required` to `reviewed` with reason
 `global_match_out_of_order`. This separates canonical reading order from physical audio order
 without allowing automatic global matching to bypass review.
+
+## Publication verification
+
+Public audio is verified with a ranged `GET`, matching how HTML5 audio streams media. A `HEAD`
+request alone is not a sufficient release check because some public object endpoints reject `HEAD`
+while correctly serving byte ranges.
+
+```bash
+python3 publication_verify.py \
+  https://cdn.example/book/chapter_01.mp3 \
+  https://cdn.example/book/chapter_63.mp3
+```
+
+Keep R2/S3 credentials in the environment, OS keychain, or a secret manager. Never commit them to
+an uploader script, chat export, or repository. The public URL is safe to publish; write-access
+credentials are not.
+
+For uploads, create an explicit `audio_manifest.json` first and use the manifest-driven uploader:
+
+```bash
+python3 -m pip install -e '.[deployment]'
+export CLOUDFLARE_R2_ACCOUNT_ID='...'
+export CLOUDFLARE_R2_ACCESS_KEY_ID='...'
+export CLOUDFLARE_R2_SECRET_ACCESS_KEY='...'
+export CLOUDFLARE_R2_BUCKET='...'
+reader-r2-upload /path/to/audio_manifest.json --dry-run
+reader-r2-upload /path/to/audio_manifest.json
+```
+
+The uploader requires every manifest source file to exist and uploads exactly the listed object
+keys. It does not infer book scope from a directory or claim completion for files absent from the
+manifest.

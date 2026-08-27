@@ -54,7 +54,19 @@ def _find_chapter_audio(audio_dir, chapter_number):
     resolution = resolve_chapter_audio(audio_dir, chapter_number)
     return str(resolution.path) if resolution.path else None
 
-def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None, force_realign=False):
+
+def _public_audio_url(public_audio_base_url, public_book_id, chapter_number):
+    """Return the canonical public name without depending on local filenames."""
+    if not public_audio_base_url or not public_book_id:
+        return None
+    public_chapter = chapter_number + 1 if chapter_number == 0 else chapter_number
+    return (
+        f"{public_audio_base_url.rstrip('/')}/{public_book_id}/"
+        f"chapter_{public_chapter:02d}.mp3"
+    )
+
+def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
+                            force_realign=False, public_audio_base_url=None, public_book_id=None):
     """
     Universally auto-discovers all chapters in a book directory,
     runs global alignment on ready pairs, and compiles the Master Interactive Reader.
@@ -98,7 +110,11 @@ def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual 
         
         # Audio file matching
         audio_file = _find_chapter_audio(audio_dir, ch_num)
-        audio_file_rel = f"./audio/{os.path.basename(audio_file)}" if audio_file else f"./audio/chapter_{ch_num:02d}.mp3"
+        public_audio_url = _public_audio_url(public_audio_base_url, public_book_id, ch_num)
+        if public_audio_url:
+            audio_file_rel = public_audio_url
+        else:
+            audio_file_rel = f"./audio/{os.path.basename(audio_file)}" if audio_file else f"./audio/chapter_{ch_num:02d}.mp3"
                 
         has_analysis = os.path.exists(analysis_path) and _analysis_ready(analysis_path, c_path)
         has_acoustic = os.path.exists(acoustic_path) and os.path.getsize(acoustic_path) > 1000
@@ -184,6 +200,8 @@ def main():
     parser.add_argument("--author", help="Book author (inferred automatically if omitted)")
     parser.add_argument("--subtitle", default="Bilingual Synchronized Reader", help="Book subtitle")
     parser.add_argument("--realign", action="store_true", help="Force re-alignment across all chapters")
+    parser.add_argument("--public-audio-base-url", help="Optional public audio CDN base URL")
+    parser.add_argument("--public-book-id", help="Public audio namespace, required with --public-audio-base-url")
     
     args = parser.parse_args()
     ready_count, _ = auto_discover_and_build(
@@ -191,7 +209,9 @@ def main():
         book_title=args.title,
         book_subtitle=args.subtitle,
         book_author=args.author,
-        force_realign=args.realign
+        force_realign=args.realign,
+        public_audio_base_url=args.public_audio_base_url,
+        public_book_id=args.public_book_id,
     )
     if ready_count == 0:
         raise SystemExit(1)

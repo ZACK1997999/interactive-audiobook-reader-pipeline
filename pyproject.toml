@@ -12,10 +12,12 @@ dependencies = []
 [project.optional-dependencies]
 acoustic = ["mlx-whisper"]
 whisperx = ["whisperx"]
+deployment = ["boto3>=1.34"]
 
 [project.scripts]
 reader-pipeline = "pipeline:main"
 reader-validate = "validate_outputs:main"
+reader-r2-upload = "r2_upload:main"
 
 [tool.setuptools]
 py-modules = [
@@ -35,5 +37,8 @@ py-modules = [
   "pipeline",
   "run_manifest",
   "artifact_io",
-  "validate_outputs"
+  "validate_outputs",
+  "manifests",
+  "publication_verify",
+  "r2_upload"
 ]
