@@ -779,9 +779,11 @@ function resolveAudioSource(section) {
 
 function rebuildSentenceTimeIndex() {
   const section = document.querySelector('.chapter-section.active');
-  sentenceTimeIndex = section ? Array.from(section.querySelectorAll('.sentence-unit[data-matched="1"]')).map(el => ({
-    start: parseFloat(el.dataset.start), end: parseFloat(el.dataset.end), el
-  })).filter(item => item.end > item.start).sort((a, b) => a.start - b.start) : [];
+  sentenceTimeIndex = section ? Array.from(section.querySelectorAll('.sentence-unit')).map(el => ({
+    start: parseFloat(el.dataset.start || '0'),
+    end: parseFloat(el.dataset.end || '0'),
+    el: el
+  })).filter(item => item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
 }
 
 function findSentenceAt(time) {
