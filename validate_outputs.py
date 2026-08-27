@@ -9,7 +9,9 @@ from artifact_io import atomic_write_json
 from release_token import issue_release_token
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
-ABBREVIATION_BEFORE_CAPITAL = re.compile(r"(?:Mrs|Mr|Ms|Dr|U\.S)$")
+ABBREVIATION_BEFORE_CAPITAL = re.compile(
+    r"(?:Mrs|Mr|Ms|Dr|Prof|Sr|Jr|Rev|Hon|Gen|Col|Maj|Capt|Lt|Sgt|Cpl|Pvt|Gov|Sen|Rep|Pres|Sec|Amb|Insp|Det|St|Mt|Ft|Mme|Mlle|Esq|Ph\.D|M\.D|B\.A|M\.A|U\.S|U\.K|U\.S\.A|e\.g|i\.e|vs|etc|al|fig|pp|vol|no|Jan|Feb|Mar|Apr|Aug|Sept|Oct|Nov|Dec|\b[A-Z])$"
+)
 MIN_CHAPTER_AUDIO_COVERAGE = 0.95
 
 

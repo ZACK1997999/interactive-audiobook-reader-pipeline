@@ -9,66 +9,58 @@ import json
 from html.parser import HTMLParser
 from artifact_io import atomic_write_json
 
+ABBR_TITLES = [
+    "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr", "Rev", "Hon", "Gen", "Col", "Maj", "Capt", "Lt", "Sgt", "Cpl", "Pvt",
+    "Gov", "Sen", "Rep", "Pres", "Sec", "Amb", "Insp", "Det", "St", "Mt", "Ft", "Mme", "Mlle", "Esq", "Ph.D", "M.D", "B.A", "M.A",
+    "Jan", "Feb", "Mar", "Apr", "Aug", "Sept", "Oct", "Nov", "Dec"
+]
+
 def split_into_atomic_sentences(text):
-    abbr_map = {
-        'Mr.': '__ABBR_MR__',
-        'Mrs.': '__ABBR_MRS__',
-        'Ms.': '__ABBR_MS__',
-        'Dr.': '__ABBR_DR__',
-        'Prof.': '__ABBR_PROF__',
-        'Sr.': '__ABBR_SR__',
-        'Jr.': '__ABBR_JR__',
-        'vs.': '__ABBR_VS__',
-        'etc.': '__ABBR_ETC__',
-        'e.g.': '__ABBR_EG__',
-        'i.e.': '__ABBR_IE__',
-        'U.S.': '__ABBR_US__',
-        'U.K.': '__ABBR_UK__',
-        'a.m.': '__ABBR_AM__',
-        'p.m.': '__ABBR_PM__',
-        'St.': '__ABBR_ST__',
-        'Gen.': '__ABBR_GEN__',
-        'Capt.': '__ABBR_CAPT__',
-        'Col.': '__ABBR_COL__',
-        'Lt.': '__ABBR_LT__',
-        'Jan.': '__ABBR_JAN__',
-        'Feb.': '__ABBR_FEB__',
-        'Mar.': '__ABBR_MAR__',
-        'Apr.': '__ABBR_APR__',
-        'Aug.': '__ABBR_AUG__',
-        'Sept.': '__ABBR_SEPT__',
-        'Oct.': '__ABBR_OCT__',
-        'Nov.': '__ABBR_NOV__',
-        'Dec.': '__ABBR_DEC__'
-    }
-    
     protected = text
-    for k, v in abbr_map.items():
-        protected = protected.replace(k, v)
-        
-    protected = re.sub(r'(\d+)\.(\d+)', r'\1__DOT__\2', protected)
-    
-    # Split pattern for terminal punctuation + quotes/parens + space + capital
-    pattern = re.compile(r'([.!?]+[\"\'”’\)]*)\s+(?=[\"\'“‘\(]?[A-Z0-9])')
+    # 1. Protect titles, honorifics, and months with trailing dot
+    for title in ABBR_TITLES:
+        safe_key = f"__ABBR_{title.replace('.', '_')}__"
+        protected = re.sub(rf"\b{re.escape(title)}\.", safe_key, protected)
+
+    # 2. Protect single capital initials (e.g. "J. Elon Haldeman", "W. E. B. Du Bois", "J. K. Rowling")
+    protected = re.sub(r"\b([A-Z])\.", r"\1__INITIAL_DOT__", protected)
+
+    # 3. Protect decimal numbers (e.g. 3.14, 10.5)
+    protected = re.sub(r"(\d+)\.(\d+)", r"\1__NUM_DOT__\2", protected)
+
+    # 4. Protect common latin and reference shorthand
+    protected = re.sub(r"\b(e\.g|i\.e|vs|etc|al|fig|figs|pp|vol|vols|no|nos|ch|sec|ed|eds|ibid|cf|ca)\.", r"__\1_DOT__", protected, flags=re.IGNORECASE)
+
+    # 5. Protect a.m./p.m. ONLY when inside a sentence (not followed by a capital letter / abbreviation placeholder)
+    protected = re.sub(r"\b(a\.m|p\.m)\.(?!\s+(?:[\"\'“‘\(]?[A-Z0-9]|__ABBR_))", r"__\1_DOT__", protected, flags=re.IGNORECASE)
+
+    # Split pattern for terminal punctuation + quotes/parens + space + (capital OR abbreviation placeholder)
+    pattern = re.compile(r"([.!?]+[\"\'”’\)]*)\s+(?=[\"\'“‘\(]?(?:[A-Z0-9]|__ABBR_))")
     tokens = pattern.split(protected)
     sentences = []
-    
+
     i = 0
     while i < len(tokens):
         part = tokens[i]
         if i + 1 < len(tokens):
-            part += tokens[i+1]
+            part += tokens[i + 1]
             i += 2
         else:
             i += 1
         part = part.strip()
         if not part:
             continue
-        for k, v in abbr_map.items():
-            part = part.replace(v, k)
-        part = part.replace('__DOT__', '.')
+
+        # Restore titles
+        for title in ABBR_TITLES:
+            safe_key = f"__ABBR_{title.replace('.', '_')}__"
+            part = part.replace(safe_key, f"{title}.")
+
+        part = part.replace("__INITIAL_DOT__", ".")
+        part = part.replace("__NUM_DOT__", ".")
+        part = re.sub(r"__([a-zA-Z\._]+)_DOT__", lambda m: m.group(1).replace("_", ".") + ".", part)
         sentences.append(part)
-        
+
     return sentences
 
 class ChapterParser(HTMLParser):
