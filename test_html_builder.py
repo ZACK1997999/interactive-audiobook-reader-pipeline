@@ -169,7 +169,7 @@ class HTMLBuilderTests(unittest.TestCase):
             self.assertIn("document.addEventListener('visibilitychange'", rendered)
             self.assertIn("data-public-audio=\"https://cdn.example/book/chapter_01.mp3\"", rendered)
 
-    def test_p2_reader_has_native_speed_shadowing_and_anki_tsv(self):
+    def test_p2_reader_has_native_preserves_pitch_and_double_tap_shadowing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             tmp_path = Path(temp_dir)
             output = tmp_path / "reader.html"
@@ -181,9 +181,8 @@ class HTMLBuilderTests(unittest.TestCase):
                 }], str(output), release_token=token, release_report_path=report_path,
             )
             rendered = output.read_text(encoding="utf-8")
-            self.assertIn("audio.playbackRate = rate", rendered)
             self.assertIn("audio.preservesPitch = true", rendered)
+            self.assertIn("startSentenceShadowing", rendered)
+            self.assertIn("isDoubleTap", rendered)
             for state in ("'idle'", "'playing'", "'pause_buffer'", "'replaying'"):
                 self.assertIn(state, rendered)
-            self.assertIn("text/tab-separated-values;charset=utf-8", rendered)
-            self.assertIn("'[背景]。你说：“'", rendered)

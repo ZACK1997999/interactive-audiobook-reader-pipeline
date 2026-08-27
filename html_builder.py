@@ -329,28 +329,70 @@ body {{
 .drawer-tips {{
   display: none;
   font-family: var(--font-sans);
-  font-size: 0.80rem;
-  color: var(--text-sub);
+  font-size: 0.82rem;
   background: var(--bg-page);
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 14px 18px;
+  border-radius: 10px;
   border: 1px solid var(--border);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.02);
 }}
 
 .drawer-tips.open {{
   display: block;
 }}
 
-.tips-grid {{
+.tips-columns {{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}}
+
+@media (max-width: 600px) {{
+  .tips-columns {{
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }}
+}}
+
+.tips-section {{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}}
+
+.tips-section-title {{
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--border);
+}}
+
+.tips-row {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-main);
+  line-height: 1.4;
 }}
 
 .tips-key {{
+  display: inline-block;
+  font-family: var(--font-sans);
   font-weight: 600;
-  color: var(--accent);
-  margin-right: 4px;
+  font-size: 0.74rem;
+  color: var(--text-main);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  white-space: nowrap;
 }}
 
 /* Main Layout */
@@ -575,21 +617,12 @@ body {{
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
-            Speed
-            <select id="playbackRateSelect" onchange="setPlaybackRate(this.value)">
-              <option value="0.75">0.75x</option><option value="1" selected>1.0x</option>
-              <option value="1.25">1.25x</option><option value="1.5">1.5x</option>
-              <option value="1.75">1.75x</option><option value="2">2.0x</option>
-            </select>
-          </label>
-          <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
             Repeat
             <select id="shadowRepeatSelect" onchange="setShadowRepetitions(this.value)">
               <option value="1">1x</option><option value="3" selected>3x</option><option value="5">5x</option>
             </select>
           </label>
-          <button class="icon-btn" id="shadowBtn" onclick="toggleShadowing()">R · Shadow</button>
-          <button class="icon-btn" onclick="exportCurrentAnkiCard()">Export Anki TSV</button>
+          <button class="icon-btn" id="shadowBtn" onclick="toggleShadowing()">Repeat</button>
         </div>
         <div class="drawer-group">
           <label style="font-family: var(--font-sans); font-size: 0.82rem; display: flex; align-items: center; gap: 4px; color: var(--text-sub);">
@@ -599,13 +632,19 @@ body {{
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
       <div class="drawer-tips" id="drawerTips">
-        <div class="tips-grid">
-          <div class="tips-item"><span class="tips-key">Tap English</span> Replay sentence & show breakdown</div>
-          <div class="tips-item"><span class="tips-key">Tap Chinese</span> Collapse card</div>
-          <div class="tips-item"><span class="tips-key">Spacebar</span> Toggle translation & vocabulary</div>
-          <div class="tips-item"><span class="tips-key">← / ↑</span> Jump to previous sentence</div>
-          <div class="tips-item"><span class="tips-key">→ / ↓</span> Jump to next sentence</div>
-          <div class="tips-item"><span class="tips-key">R</span> Start or stop sentence shadowing</div>
+        <div class="tips-columns">
+          <div class="tips-section">
+            <div class="tips-section-title">Touch & Mouse</div>
+            <div class="tips-row"><span class="tips-key">Tap Sentence</span><span>Play audio & show breakdown</span></div>
+            <div class="tips-row"><span class="tips-key">Double Tap</span><span>Repeat sentence loop</span></div>
+            <div class="tips-row"><span class="tips-key">Tap Card</span><span>Collapse card</span></div>
+          </div>
+          <div class="tips-section">
+            <div class="tips-section-title">Keyboard Shortcuts</div>
+            <div class="tips-row"><span class="tips-key">Space</span><span>Toggle breakdown card</span></div>
+            <div class="tips-row"><span class="tips-key">R</span><span>Repeat current sentence</span></div>
+            <div class="tips-row"><span class="tips-key">← / →</span><span>Previous / Next sentence</span></div>
+          </div>
         </div>
       </div>
     </div>
@@ -851,10 +890,43 @@ function toggleTips() {
   }
 }
 
+let lastSentenceClickTime = 0;
+let lastSentenceClickId = null;
+
+function startSentenceShadowing(sentenceEl) {
+  if (!sentenceEl || sentenceEl.dataset.matched !== '1') return;
+  if (shadowState.timer) clearTimeout(shadowState.timer);
+  shadowState.phase = 'playing';
+  shadowState.completed = 0;
+  shadowState.sentence = sentenceEl;
+  const btn = document.getElementById('shadowBtn');
+  if (btn) btn.textContent = 'Stop Repeat';
+  
+  const activeSection = document.querySelector('.chapter-section.active') || document.querySelector('.chapter-section');
+  if (activeSection && activeSection.dataset.audio) {
+    attachAudioSource(activeSection.dataset.audio);
+  }
+  const start = parseFloat(sentenceEl.dataset.start);
+  audio.currentTime = start;
+  audio.play();
+  globalPlayBtn.textContent = '⏸ Pause';
+  sentenceEl.classList.add('active');
+}
+
 function handleSentenceClick(event, id, start, end, hasMatch) {
   if (event) event.stopPropagation();
   const el = document.getElementById(id);
   if (!el) return;
+  
+  const now = Date.now();
+  const isDoubleTap = (lastSentenceClickId === id && (now - lastSentenceClickTime) < 350);
+  lastSentenceClickTime = now;
+  lastSentenceClickId = id;
+  
+  if (isDoubleTap) {
+    startSentenceShadowing(el);
+    return;
+  }
   
   localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
   if (start > 0 || hasMatch) {
@@ -886,18 +958,9 @@ function toggleGlobalPlay() {
   }
 }
 
-function setPlaybackRate(value) {
-  const rate = Math.max(0.75, Math.min(2.0, parseFloat(value) || 1));
-  audio.playbackRate = rate;
-  audio.preservesPitch = true;
-  audio.mozPreservesPitch = true;
-  audio.webkitPreservesPitch = true;
-  localStorage.setItem(STORAGE_PREFIX + 'playback_rate', String(rate));
-}
-
-const savedPlaybackRate = localStorage.getItem(STORAGE_PREFIX + 'playback_rate') || '1';
-document.getElementById('playbackRateSelect').value = savedPlaybackRate;
-setPlaybackRate(savedPlaybackRate);
+audio.preservesPitch = true;
+audio.mozPreservesPitch = true;
+audio.webkitPreservesPitch = true;
 
 function setShadowRepetitions(value) {
   shadowState.repetitions = Math.max(1, parseInt(value, 10) || 3);
@@ -909,7 +972,8 @@ function stopShadowing() {
   shadowState.completed = 0;
   shadowState.sentence = null;
   shadowState.timer = null;
-  document.getElementById('shadowBtn').textContent = 'R · Shadow';
+  const btn = document.getElementById('shadowBtn');
+  if (btn) btn.textContent = 'Repeat';
 }
 
 function toggleShadowing() {
@@ -918,13 +982,9 @@ function toggleShadowing() {
     return;
   }
   const sentence = findSentenceAt(audio.currentTime) || document.getElementById(currentPlayingId);
-  if (!sentence || sentence.dataset.matched !== '1') return;
-  shadowState.phase = 'playing';
-  shadowState.completed = 0;
-  shadowState.sentence = sentence;
-  document.getElementById('shadowBtn').textContent = 'Stop Shadow';
-  audio.currentTime = parseFloat(sentence.dataset.start);
-  audio.play();
+  if (sentence) {
+    startSentenceShadowing(sentence);
+  }
 }
 
 function advanceShadowing() {
@@ -944,26 +1004,6 @@ function advanceShadowing() {
     audio.currentTime = parseFloat(shadowState.sentence.dataset.start);
     audio.play();
   }, 650);
-}
-
-function tsvField(value) {
-  return String(value || '').replace(/[\\t\\r\\n]+/g, ' ').trim();
-}
-
-function exportCurrentAnkiCard() {
-  const sentence = findSentenceAt(audio.currentTime) || document.getElementById(currentPlayingId);
-  if (!sentence) return;
-  let vocabulary = [];
-  try { vocabulary = JSON.parse(sentence.dataset.vocab || '[]'); } catch (_) { vocabulary = []; }
-  const vocabText = vocabulary.map(item => [item.word, item.pos, item.def].filter(Boolean).join(' · ')).join(' | ');
-  const front = '[背景]。你说：“' + tsvField(sentence.dataset.text) + '”';
-  const row = [front, tsvField(sentence.dataset.trans), tsvField(vocabText), window.__BOOK_ID__, sentence.id].join('\\t');
-  const blob = new Blob(['\\ufeff' + row + '\\n'], { type: 'text/tab-separated-values;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = window.__BOOK_ID__ + '-' + sentence.id + '-anki.tsv';
-  link.click();
-  URL.revokeObjectURL(link.href);
 }
 
 function startSyncLoop() {
