@@ -599,7 +599,7 @@ body {{
   <div class="nav-bar">
     <div class="chapter-nav-wrapper">
       <button class="chapter-btn" id="chapterSelectBtn" onclick="toggleChapterDropdown(event)">
-        <span>📖 {html.escape(book_title)} · <span id="currentChapterLabel">Ch. 0</span></span>
+        <span>{html.escape(book_title)} · <span id="currentChapterLabel">Ch. 0</span></span>
         <span class="dropdown-arrow">▾</span>
       </button>
       <div class="chapter-dropdown" id="chapterDropdown">
