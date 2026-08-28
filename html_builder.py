@@ -80,6 +80,15 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="reader-release-report-sha256" content="{html.escape(release_token.report_sha256)}">
 <title>{html.escape(book_title)}: {html.escape(book_subtitle)}</title>
+<script>
+(function() {{
+  var bId = {json.dumps(book_id)};
+  var t = localStorage.getItem('audible_reader_theme') || localStorage.getItem('reader_' + bId + '_theme') || localStorage.getItem(bId + '_theme');
+  if (t) {{
+    document.documentElement.setAttribute('data-theme', t);
+  }}
+}})();
+</script>
 <style>
 :root {{
   --font-serif: "Charter", "Iowan Old Style", "Palatino Linotype", "Georgia", "Source Han Serif SC", "PingFang SC", serif;
@@ -796,6 +805,20 @@ function resolveAudioSource(section) {
   return window.location.protocol === 'file:' || !publicSource ? localSource : publicSource;
 }
 
+function reportLibraryProgress(chNum, pct) {
+  try {
+    const bookId = window.__BOOK_ID__ || (window.location.pathname.split('/').filter(Boolean).pop() || '').replace('.html', '');
+    if (!bookId) return;
+    const progressData = {
+      chapter: typeof chNum === 'number' ? chNum : 0,
+      percent: Math.min(100, Math.max(0, Math.round(pct || 0))),
+      updatedAt: Date.now()
+    };
+    localStorage.setItem('audible_progress_' + bookId, JSON.stringify(progressData));
+    localStorage.setItem('audible_last_active_book', bookId);
+  } catch (e) {}
+}
+
 function rebuildSentenceTimeIndex() {
   const section = document.querySelector('.chapter-section.active');
   sentenceTimeIndex = section ? Array.from(section.querySelectorAll('.sentence-unit')).map(el => ({
@@ -850,6 +873,7 @@ function switchChapter(chNum) {
     }
   });
   rebuildSentenceTimeIndex();
+  reportLibraryProgress(chNum, 0);
   
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -879,12 +903,14 @@ const themes = ['sepia', 'light', 'dark'];
 let currentThemeIndex = 0;
 function toggleTheme() {
   currentThemeIndex = (currentThemeIndex + 1) % themes.length;
-  document.documentElement.setAttribute('data-theme', themes[currentThemeIndex]);
-  localStorage.setItem(STORAGE_PREFIX + 'theme', themes[currentThemeIndex]);
+  const newTheme = themes[currentThemeIndex];
+  document.documentElement.setAttribute('data-theme', newTheme);
+  localStorage.setItem(STORAGE_PREFIX + 'theme', newTheme);
+  localStorage.setItem('audible_reader_theme', newTheme);
 }
 
-const savedTheme = localStorage.getItem(STORAGE_PREFIX + 'theme');
-if (savedTheme) {
+const savedTheme = localStorage.getItem('audible_reader_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || localStorage.getItem((window.__BOOK_ID__ || 'default') + '_theme');
+if (savedTheme && themes.includes(savedTheme)) {
   document.documentElement.setAttribute('data-theme', savedTheme);
   currentThemeIndex = themes.indexOf(savedTheme);
 }
@@ -924,8 +950,11 @@ function startSentenceShadowing(sentenceEl) {
   if (btn) btn.textContent = 'Stop Repeat';
   
   const activeSection = document.querySelector('.chapter-section.active') || document.querySelector('.chapter-section');
-  if (activeSection && activeSection.dataset.audio) {
-    attachAudioSource(activeSection.dataset.audio);
+  if (activeSection) {
+    const desiredSrc = resolveAudioSource(activeSection);
+    if (desiredSrc && audio.getAttribute('src') !== desiredSrc) {
+      audio.src = desiredSrc;
+    }
   }
   const start = parseFloat(sentenceEl.dataset.start);
   audio.currentTime = start;
@@ -1038,7 +1067,12 @@ function stopSyncLoop() {
 
 audio.addEventListener('play', () => { globalPlayBtn.textContent = '⏸ Pause'; startSyncLoop(); });
 audio.addEventListener('pause', () => { globalPlayBtn.textContent = '▶ Play'; stopSyncLoop(); });
-audio.addEventListener('timeupdate', syncPlayback);
+audio.addEventListener('timeupdate', () => {
+  syncPlayback();
+  if (!Number.isNaN(audio.currentTime) && audio.duration) {
+    reportLibraryProgress(activeChapterNum, (audio.currentTime / audio.duration) * 100);
+  }
+});
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopSyncLoop(); else startSyncLoop(); });
 
 function syncPlayback() {
