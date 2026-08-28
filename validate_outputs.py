@@ -194,7 +194,8 @@ def validate(book_dir: Path, report_path=None):
                 errors.append(f"{label} {item_id}: missing audio word spans")
             start = float(item.get("raw_start", item.get("start", -1)))
             end = float(item.get("raw_end", item.get("end", -1)))
-            if start < previous_start and not approved_non_monotonic:
+            participates_in_timeline = not owner_accepted and not non_narrated
+            if participates_in_timeline and start < previous_start and not approved_non_monotonic:
                 errors.append(f"{label} {item_id}: non-monotonic raw start")
             if end < start:
                 errors.append(f"{label} {item_id}: end precedes start")
@@ -203,7 +204,8 @@ def validate(book_dir: Path, report_path=None):
                 span_end = float(span.get("end", -1))
                 if span_start < 0 or span_end < span_start:
                     errors.append(f"{label} {item_id}: invalid word span")
-            previous_start = start
+            if participates_in_timeline:
+                previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
             source_tokens = int(item.get("source_token_count", 0))

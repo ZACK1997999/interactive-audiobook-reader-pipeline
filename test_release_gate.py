@@ -71,6 +71,30 @@ class ReleaseGateTests(unittest.TestCase):
             }), encoding="utf-8")
             self.assertEqual(validate(root), 0)
 
+    def test_accepted_unmatched_record_does_not_poison_timeline_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio").mkdir()
+            (root / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+            canonical = [
+                {"id": "s-1", "text": "First sentence."},
+                {"id": "s-2", "text": "Print only sidebar."},
+                {"id": "s-3", "text": "Third sentence."},
+            ]
+            analysis = [{**item, "trans": "译文", "vocab": []} for item in canonical]
+            aligned = [
+                {**analysis[0], "word_spans": [{"word": "First", "start": 1, "end": 2}], "raw_start": 1, "raw_end": 2, "has_audio_match": True, "fallback_used": False, "alignment_status": "validated", "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1},
+                {**analysis[1], "word_spans": [], "raw_start": 99, "raw_end": 99, "has_audio_match": False, "fallback_used": False, "alignment_status": "review-required", "matched_token_count": 0, "source_token_count": 3, "match_ratio": 0},
+                {**analysis[2], "word_spans": [{"word": "Third", "start": 3, "end": 4}], "raw_start": 3, "raw_end": 4, "has_audio_match": True, "fallback_used": False, "alignment_status": "validated", "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1},
+            ]
+            for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            (root / "reader_review_ledger.json").write_text(json.dumps({
+                "schema_version": 1,
+                "reviews": [{"chapter": 1, "sentence_id": "s-2", "decision": "accepted", "reviewer": "project_owner", "evidence": "Verified as print-only content between narrated anchors."}],
+            }), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
+
     def test_reviewed_out_of_order_alignment_can_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

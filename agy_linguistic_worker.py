@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -144,20 +145,6 @@ def verify_analysis(data: Any, canonical_data: list[dict]) -> None:
                 raise RuntimeError(f"malformed vocabulary item in record {item_id}")
 
 
-def process_canonical_sentences(
-    canonical_data: list[dict],
-    base_prompt: str,
-    cwd: Path,
-    chunk_size: int = CHUNK_SIZE,
-    timeout: int = 3700,
-    max_batch_attempts: int = 3,
-) -> list[dict]:
-    chunks = chunk_sentences(canonical_data, chunk_size=chunk_size)
-    if not chunks:
-        return []
-
-import concurrent.futures
-
 def _process_single_batch(batch_idx: int, batch: list[dict], base_prompt: str, total_batches: int,
                           cwd: Path, timeout: int, max_batch_attempts: int) -> list[dict]:
     prompt = build_batch_prompt(base_prompt, batch, batch_idx, total_batches)
@@ -219,26 +206,9 @@ def _process_single_batch(batch_idx: int, batch: list[dict], base_prompt: str, t
                 time.sleep(1)
                 continue
 
-            # Normalize and sanitize returned records to guarantee strict contract compliance
-            normalized_batch = []
-            for item in batch:
-                res = returned_map[item["id"]]
-                if not isinstance(res.get("trans"), str) or not res.get("trans", "").strip():
-                    res["trans"] = item.get("text", "")
-                if not isinstance(res.get("vocab"), list):
-                    res["vocab"] = []
-                else:
-                    cleaned_vocab = []
-                    for v in res["vocab"]:
-                        if isinstance(v, dict) and all(isinstance(v.get(k), str) and v.get(k).strip() for k in ("word", "pos", "def")):
-                            cleaned_vocab.append(v)
-                    res["vocab"] = cleaned_vocab
-                res["text"] = item.get("text", "")
-                if "is_heading" in item:
-                    res["is_heading"] = item["is_heading"]
-                normalized_batch.append(res)
-
-            return normalized_batch
+            ordered_batch = [returned_map[item["id"]] for item in batch]
+            verify_analysis(ordered_batch, batch)
+            return ordered_batch
         except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
             last_error = str(exc)
             time.sleep(1)
@@ -255,14 +225,17 @@ def process_canonical_sentences(
     chunk_size: int = CHUNK_SIZE,
     timeout: int = 3700,
     max_batch_attempts: int = 3,
+    max_workers: int = 1,
 ) -> list[dict]:
     chunks = chunk_sentences(canonical_data, chunk_size=chunk_size)
     if not chunks:
         return []
 
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+
     master_list: list[dict] = []
-    max_workers = min(4, len(chunks))
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
         futures = [
             executor.submit(
                 _process_single_batch,
@@ -292,6 +265,7 @@ def main(environ: dict[str, str] | None = None) -> int:
         canonical_data=canonical_data,
         base_prompt=base_prompt,
         cwd=canonical_path.parent,
+        max_workers=int(env.get("READER_LINGUISTIC_MAX_WORKERS", "1")),
     )
 
     atomic_write_json(output_path, analyzed_data)

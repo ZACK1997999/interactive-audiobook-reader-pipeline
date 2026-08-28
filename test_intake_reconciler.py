@@ -109,6 +109,20 @@ class IntakeReconcilerTests(unittest.TestCase):
             self.assertEqual(matches[0]["audio_indices"], [0])
             self.assertGreaterEqual(matches[0]["confidence"], 0.90)
 
+    def test_reconciler_records_print_only_epub_spine_documents(self):
+        chapters = [
+            {"title": "Cover", "head_anchor": "cover", "tail_anchor": "cover", "text_chars": 5},
+            {"title": "Chapter One", "head_anchor": "chapter begins", "tail_anchor": "chapter ends", "text_chars": 100},
+            {"title": "Index", "head_anchor": "index entries", "tail_anchor": "index entries", "text_chars": 50},
+        ]
+        audios = [{"name": "chapter.mp3", "duration": 60.0}]
+        probes = {"chapter.mp3": {"head": "chapter begins", "tail": "chapter ends"}}
+        from intake_reconciler import reconcile
+        rows = reconcile(chapters, audios, probes)
+        self.assertEqual([row["kind"] for row in rows], ["skip_chapter", "match", "skip_chapter"])
+        self.assertEqual(rows[1]["chapter_indices"], [1])
+        self.assertEqual(rows[1]["audio_indices"], [0])
+
 
 if __name__ == "__main__":
     unittest.main()

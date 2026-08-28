@@ -44,7 +44,7 @@ def _now() -> str:
 
 def _release_fingerprint(config: Dict) -> str:
     records = {"book_id": config["book_id"]}
-    for key in ("reader_html", "audio_manifest", "cover", "intake_plan"):
+    for key in ("reader_html", "audio_manifest", "cover", "intake_plan", "release_report"):
         if config.get(key):
             path = Path(config[key]).expanduser().resolve()
             records[key] = {"path": str(path), "sha256": _sha256(path) if path.is_file() else None}
@@ -182,19 +182,56 @@ def update_library_manifest(path: Path, entry: Dict) -> Dict:
     return data
 
 
+def validate_single_manifest_source(index_text: str) -> None:
+    """Reject embedded shelf catalogs, including aliases used to evade the old check."""
+    forbidden = ("INLINE_MANIFEST", "BUILTIN_MANIFEST_DATA", "EMBEDDED_MANIFEST")
+    found = [name for name in forbidden if name in index_text]
+    if found or re.search(r"\b(?:const|let|var)\s+ALL_BOOKS\s*=\s*\[\s*\{", index_text):
+        detail = ", ".join(found) if found else "inline ALL_BOOKS array"
+        raise RuntimeError(f"portal index embeds shelf data ({detail}); manifest.json must be the single data source")
+
+
+def validate_reader_audio_contract(reader_text: str, entries: list[Dict]) -> None:
+    urls = re.findall(r'\bdata-public-audio="([^"]*)"', reader_text)
+    expected = [entry.get("public_url") for entry in entries]
+    if len(urls) != len(entries):
+        raise RuntimeError(f"reader/audio manifest chapter count mismatch: {len(urls)} != {len(entries)}")
+    if any(not isinstance(url, str) or not re.match(r"^https://", url) for url in expected):
+        raise ValueError("every audio manifest entry requires an HTTPS public_url")
+    if urls != expected:
+        raise RuntimeError("reader public audio URLs differ from audio_manifest.json")
+
+
+def validate_release_report(reader_text: str, report_path: Path) -> None:
+    report_path = Path(report_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    if report.get("release_ready") is not True or report.get("errors") or report.get("warnings"):
+        raise RuntimeError("release report does not authorize publication")
+    match = re.search(r'<meta name="reader-release-report-sha256" content="([0-9a-f]{64})">', reader_text)
+    if not match or match.group(1) != _sha256(report_path):
+        raise RuntimeError("reader was not compiled from the supplied release report")
+
+
 def _preflight(config: Dict, context: Dict) -> Dict:
-    required = ("book_id", "reader_html", "audio_manifest", "portal_repo", "manifest_entry", "public_reader_url")
+    required = (
+        "book_id", "reader_html", "audio_manifest", "intake_plan", "release_report",
+        "portal_repo", "manifest_entry", "public_reader_url",
+    )
     missing = [key for key in required if not config.get(key)]
     if missing:
         raise ValueError("missing publisher configuration: " + ", ".join(missing))
     reader = Path(config["reader_html"]).expanduser().resolve()
     audio_manifest = Path(config["audio_manifest"]).expanduser().resolve()
     repo = Path(config["portal_repo"]).expanduser().resolve()
-    for path in (reader, audio_manifest, repo / "manifest.json", repo / "index.html"):
+    release_report = Path(config["release_report"]).expanduser().resolve()
+    for path in (reader, audio_manifest, release_report, repo / "manifest.json", repo / "index.html"):
         if not path.exists():
             raise FileNotFoundError(path)
-    if config.get("enforce_single_manifest", True) and "INLINE_MANIFEST" in (repo / "index.html").read_text(encoding="utf-8"):
-        raise RuntimeError("portal index still contains INLINE_MANIFEST; manifest.json must be the single data source")
+    if config.get("enforce_single_manifest", True):
+        validate_single_manifest_source((repo / "index.html").read_text(encoding="utf-8"))
+    intake_plan = json.loads(Path(config["intake_plan"]).expanduser().read_text(encoding="utf-8"))
+    if float(intake_plan.get("threshold", 0.0)) < 0.90 and not config.get("allow_recovery_intake"):
+        raise RuntimeError("intake plan uses recovery threshold; publication requires explicit allow_recovery_intake")
     entries = json.loads(audio_manifest.read_text(encoding="utf-8")).get("entries", [])
     if not entries:
         raise ValueError("audio manifest has no entries")
@@ -204,6 +241,12 @@ def _preflight(config: Dict, context: Dict) -> Dict:
             raise RuntimeError(f"audio source missing or changed: {source}")
         if not entry.get("public_url") or not entry.get("bytes"):
             raise ValueError(f"audio entry lacks public_url/bytes: {entry.get('object_key')}")
+    reader_text = reader.read_text(encoding="utf-8")
+    validate_reader_audio_contract(reader_text, entries)
+    validate_release_report(reader_text, release_report)
+    local_audio = repo / "books" / config["book_id"] / "audio"
+    if local_audio.is_symlink():
+        raise RuntimeError(f"portal book audio must not be a local symlink: {local_audio}")
     shelf_entry = resolve_manifest_entry(config)
     missing_shelf = [key for key in ("title", "author", "chaptersCount", "totalDuration") if not shelf_entry.get(key)]
     if missing_shelf:

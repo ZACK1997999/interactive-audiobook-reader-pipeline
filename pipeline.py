@@ -27,6 +27,7 @@ from audio_resolver import resolve_chapter_audio
 from run_manifest import update_manifest
 from quality_gate import smoke_check_html
 from artifact_io import atomic_write_json
+from chapter_metadata import load_chapter_metadata
 
 
 @contextlib.contextmanager
@@ -138,7 +139,8 @@ def _public_audio_url(public_audio_base_url, public_book_id, chapter_number):
     )
 
 def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
-                             force_realign=False, public_audio_base_url=None, public_book_id=None):
+                             force_realign=False, public_audio_base_url=None, public_book_id=None,
+                             chapter_metadata_path=None):
     """
     Universally auto-discovers all chapters in a book directory,
     runs global alignment on ready pairs, and compiles the Master Interactive Reader.
@@ -167,6 +169,14 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
     if not chapter_artifacts:
         print(f"No canonical sentence files found in {book_dir}")
         return 0, master_html_path
+
+    metadata_path = Path(chapter_metadata_path or (Path(book_dir) / "chapter_metadata.json"))
+    chapter_metadata = None
+    if metadata_path.is_file():
+        chapter_metadata = load_chapter_metadata(
+            metadata_path,
+            expected_chapters=[artifact.chapter_number for artifact in chapter_artifacts],
+        )
 
     audio_manifest = _load_audio_manifest(book_dir)
     discovered_audio = {}
@@ -258,7 +268,10 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
             with open(c_path, 'r', encoding='utf-8') as f:
                 c_data = json.load(f)
             h_texts = [d["text"] for d in c_data if d.get("is_heading")]
-            if ch_num == 0:
+            metadata = chapter_metadata.get(ch_num) if chapter_metadata else None
+            if metadata:
+                title = metadata["title"]
+            elif ch_num == 0:
                 title = "Preface"
             elif len(h_texts) >= 2:
                 title = h_texts[1]
@@ -267,13 +280,18 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
             else:
                 title = f"Chapter {ch_num}"
                 
-            aligned_configs.append({
+            chapter_config = {
                 "num": ch_num,
                 "title": title,
-                "audio": f"./audio/{os.path.basename(audio_file)}" if audio_file else audio_file_rel,
+                # A verified public URL is authoritative for published readers;
+                # local paths are only a preview fallback when no URL exists.
+                "audio": audio_file_rel,
                 "public_audio": public_audio_url,
                 "aligned_json": aligned_path
-            })
+            }
+            if metadata:
+                chapter_config.update(metadata)
+            aligned_configs.append(chapter_config)
             
     for entry in manifest_chapters:
         aligned_file = Path(book_dir) / entry["aligned"]
@@ -319,12 +337,13 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
 
 
 def auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual Synchronized Reader", book_author=None,
-                            force_realign=False, public_audio_base_url=None, public_book_id=None):
+                            force_realign=False, public_audio_base_url=None, public_book_id=None,
+                            chapter_metadata_path=None):
     book_dir = os.path.abspath(book_dir)
     with _book_run_lock(book_dir):
         return _auto_discover_and_build(
             book_dir, book_title, book_subtitle, book_author,
-            force_realign, public_audio_base_url, public_book_id,
+            force_realign, public_audio_base_url, public_book_id, chapter_metadata_path,
         )
 
 def main():
@@ -336,6 +355,7 @@ def main():
     parser.add_argument("--realign", action="store_true", help="Force re-alignment across all chapters")
     parser.add_argument("--public-audio-base-url", help="Optional public audio CDN base URL")
     parser.add_argument("--public-book-id", help="Public audio namespace, required with --public-audio-base-url")
+    parser.add_argument("--chapter-metadata", help="Validated display metadata JSON (defaults to BOOK_DIR/chapter_metadata.json)")
     
     args = parser.parse_args()
     ready_count, _ = auto_discover_and_build(
@@ -346,6 +366,7 @@ def main():
         force_realign=args.realign,
         public_audio_base_url=args.public_audio_base_url,
         public_book_id=args.public_book_id,
+        chapter_metadata_path=args.chapter_metadata,
     )
     if ready_count == 0:
         raise SystemExit(1)

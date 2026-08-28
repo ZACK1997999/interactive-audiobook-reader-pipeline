@@ -3,6 +3,7 @@
   "reader_html": "/path/to/book/Example_Interactive_Reader.html",
   "audio_manifest": "/path/to/book/audio_manifest.json",
   "intake_plan": "/path/to/book/intake_plan.json",
+  "release_report": "/path/to/book/reader_validation_report.json",
   "cover": "/path/to/book/cover.jpg",
   "archive_html": "/path/to/obsidian/Example_Interactive_Reader.html",
   "portal_repo": "/Users/lindy/Vault/Audible",
@@ -18,5 +19,6 @@
     "status": "Studio Audiobook"
   },
   "git_remote": "origin",
-  "git_branch": "main"
+  "git_branch": "main",
+  "allow_recovery_intake": false
 }

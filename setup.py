@@ -13,6 +13,7 @@ setup(
         "contract_adapters",
         "chapter_resolver",
         "chapter_locator",
+        "chapter_metadata",
         "acoustic_backend",
         "whisperx_backend",
         "config",

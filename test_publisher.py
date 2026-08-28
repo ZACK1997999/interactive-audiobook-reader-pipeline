@@ -4,7 +4,15 @@ import unittest
 from pathlib import Path
 
 from artifact_io import atomic_write_json
-from publisher import STEPS, publish, resolve_manifest_entry, update_library_manifest
+from publisher import (
+    STEPS,
+    publish,
+    resolve_manifest_entry,
+    update_library_manifest,
+    validate_reader_audio_contract,
+    validate_release_report,
+    validate_single_manifest_source,
+)
 
 
 def _config(root: Path):
@@ -25,6 +33,36 @@ def _config(root: Path):
 
 
 class PublisherTests(unittest.TestCase):
+    def test_portal_rejects_any_embedded_manifest_alias(self):
+        for declaration in (
+            "const INLINE_MANIFEST = {books: []};",
+            "const BUILTIN_MANIFEST_DATA = {books: []};",
+            "let ALL_BOOKS = [{id: 'book'}];",
+        ):
+            with self.subTest(declaration=declaration), self.assertRaises(RuntimeError):
+                validate_single_manifest_source(declaration)
+        validate_single_manifest_source("fetch('manifest.json').then(response => response.json())")
+
+    def test_reader_audio_urls_must_match_manifest_in_order(self):
+        entries = [{"public_url": "https://cdn.example/book/chapter_00.mp3"}]
+        validate_reader_audio_contract(
+            '<section data-public-audio="https://cdn.example/book/chapter_00.mp3">', entries,
+        )
+        with self.assertRaisesRegex(RuntimeError, "differ"):
+            validate_reader_audio_contract('<section data-public-audio="">', entries)
+
+    def test_release_report_hash_is_bound_into_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.json"
+            atomic_write_json(report, {"release_ready": True, "errors": [], "warnings": []})
+            import hashlib
+            digest = hashlib.sha256(report.read_bytes()).hexdigest()
+            validate_release_report(
+                f'<meta name="reader-release-report-sha256" content="{digest}">', report,
+            )
+            with self.assertRaisesRegex(RuntimeError, "not compiled"):
+                validate_release_report("<html></html>", report)
+
     def test_journal_resumes_after_failure_without_repeating_completed_steps(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
