@@ -308,6 +308,10 @@ body {{
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   padding: 12px 16px;
+  max-height: calc(100vh - 60px);
+  max-height: calc(100dvh - 60px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }}
 
 .control-drawer.open {{
@@ -376,9 +380,50 @@ body {{
 }}
 
 @media (max-width: 600px) {{
+  .control-drawer {{
+    padding: 10px 12px;
+    max-height: calc(100vh - 54px);
+    max-height: calc(100dvh - 54px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }}
+  .drawer-inner {{
+    gap: 8px;
+  }}
+  .drawer-row {{
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }}
+  .drawer-group {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }}
+  .drawer-group > * {{
+    flex: 1 1 auto;
+    min-height: 32px;
+    box-sizing: border-box;
+  }}
+  .drawer-group label, .font-size-control {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    font-size: 0.8rem;
+  }}
+  .drawer-group select, .font-size-control select {{
+    min-width: 0;
+    flex: 1;
+    min-height: 30px;
+    padding: 3px 6px;
+  }}
   .tips-columns {{
     grid-template-columns: 1fr;
-    gap: 14px;
+    gap: 12px;
   }}
 }}
 
