@@ -1094,17 +1094,33 @@ if (savedTheme && themes.includes(savedTheme)) {
 }
 
 let currentFontSizeRem = 1.20;
-function adjustFontSize(delta) {
-  currentFontSizeRem = Math.max(0.95, Math.min(1.8, currentFontSizeRem + delta * 0.08));
-  document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
-  localStorage.setItem(STORAGE_PREFIX + 'font_size', currentFontSizeRem);
+
+function setFontSizePreset(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return;
+  currentFontSizeRem = n;
+  document.documentElement.style.setProperty('--font-size-base', n + 'rem');
+  document.documentElement.style.setProperty('--reader-font-size', n + 'rem');
+  document.querySelectorAll('.s-content, .sentence-text').forEach(function(el) {
+    el.style.fontSize = n + 'rem';
+  });
+  localStorage.setItem(STORAGE_PREFIX + 'font_size_preset', String(n));
+  localStorage.setItem(STORAGE_PREFIX + 'font_size', String(n));
+  const sel = document.getElementById('fontSizePreset');
+  if (sel) sel.value = String(n);
 }
 
-const savedFontSize = localStorage.getItem(STORAGE_PREFIX + 'font_size');
-if (savedFontSize) {
-  currentFontSizeRem = parseFloat(savedFontSize);
-  document.documentElement.style.setProperty('--font-size-base', currentFontSizeRem + 'rem');
+function adjustFontSize(delta) {
+  const next = Math.max(0.95, Math.min(1.8, (currentFontSizeRem || 1.2) + delta * 0.1));
+  setFontSizePreset(next);
 }
+
+window.setFontSizePreset = setFontSizePreset;
+window.adjustFontSize = adjustFontSize;
+window.applyFontSize = setFontSizePreset;
+
+const savedFontSize = localStorage.getItem(STORAGE_PREFIX + 'font_size_preset') || localStorage.getItem(STORAGE_PREFIX + 'font_size') || '1.2';
+setFontSizePreset(savedFontSize);
 
 function toggleTips() {
   const tipsEl = document.getElementById('drawerTips');
