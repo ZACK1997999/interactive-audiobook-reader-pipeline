@@ -2,7 +2,13 @@ name: Reader Pipeline CI
 
 on:
   push:
-    branches: [main, "upgrade/**", "refactor/**", "change/**"]
+    branches:
+      - main
+      - "experiment/**"
+      - "fix/**"
+      - "upgrade/**"
+      - "refactor/**"
+      - "change/**"
   pull_request:
     branches: [main]
 
@@ -13,7 +19,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         python-version: ["3.9", "3.11", "3.13"]
 
