@@ -46,6 +46,8 @@ def smoke_check_html(html_path: Path, expected_chapters=None):
         errors.append(f"expected {expected_chapters} chapter sections, found {len(chapters)}")
     if not re.search(r'<audio\b[^>]*\bid="audioTrack"[^>]*\bsrc="[^"]+"', content):
         errors.append("audioTrack has no source")
+    if re.search(r'<h1 class="book-title">\s*([^<\n]+)\s*<br>\s*\1\s*</h1>', content, re.IGNORECASE):
+        errors.append("found duplicate chapter title heading (e.g. TITLE<br>Title)")
     return {
         "status": "passed" if not errors else "failed",
         "errors": errors,
