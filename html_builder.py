@@ -636,6 +636,27 @@ body {{
   padding-bottom: 6px;
 }}
 
+.chapter-intext-heading {{
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-align: center;
+  margin: 24px 0 16px;
+  padding: 8px 12px;
+}}
+
+.epigraph-citation {{
+  font-style: italic;
+  color: var(--text-sub);
+  font-size: 0.95rem;
+  margin-bottom: 20px;
+  padding-left: 16px;
+  border-left: 2px solid var(--accent-light);
+}}
+
 /* Mobile Specific Refinements */
 @media (max-width: 640px) {{
   :root {{
@@ -755,13 +776,17 @@ body {{
         csents = ch["sentences"]
         active_cls = " active" if cnum == first_ch_num else ""
         ch_heading_label = ch["label"].upper()
+        if ctitle.strip().upper() == ch_heading_label.strip().upper() or ctitle.strip().upper() == f"CHAPTER {cnum}":
+            title_html = ch_heading_label
+        else:
+            title_html = f"{ch_heading_label}<br>{html.escape(ctitle)}"
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->
   <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{html.escape(caudio)}" data-public-audio="{html.escape(cpublic_audio)}" data-ch="{cnum}">
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
-      <h1 class="book-title">{ch_heading_label}<br>{html.escape(ctitle)}</h1>
+      <h1 class="book-title">{title_html}</h1>
       <div class="book-author">{html.escape(book_author)}</div>
     </header>
 
@@ -803,7 +828,13 @@ body {{
             if vocab_html_list:
                 vocab_section = f'<div class="inspect-vocab-list">{"".join(vocab_html_list)}</div>'
                 
-            h_class = " chapter-heading-1" if is_h else ""
+            h_class = ""
+            if is_h:
+                h_class += " chapter-heading-1"
+            elif re.match(r"^CHAPTER\s+(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY|[A-Z\-]+|\d+)\s*$", raw_text.strip(), re.IGNORECASE):
+                h_class += " chapter-intext-heading"
+            elif raw_text.strip().startswith(("—", "–", "--", "- ")):
+                h_class += " epigraph-citation"
             html_head += f"""
       <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
         <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
