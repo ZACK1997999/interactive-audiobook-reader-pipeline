@@ -854,8 +854,14 @@ function reportLibraryProgress(chNum, pct) {
   try {
     const bookId = window.__BOOK_ID__ || (window.location.pathname.split('/').filter(Boolean).pop() || '').replace('.html', '');
     if (!bookId) return;
+    const menuEl = document.getElementById('menu-ch-' + chNum);
+    const tagText = menuEl ? menuEl.querySelector('.chapter-item-tag')?.textContent?.trim() : null;
+    const titleText = menuEl ? menuEl.querySelector('span:not(.chapter-item-tag)')?.textContent?.trim() : null;
+    const label = tagText || (chNum === 0 ? 'Preface' : ('Chapter ' + chNum));
     const progressData = {
       chapter: typeof chNum === 'number' ? chNum : 0,
+      chapterLabel: label,
+      chapterTitle: titleText || label,
       percent: Math.min(100, Math.max(0, Math.round(pct || 0))),
       updatedAt: Date.now()
     };
