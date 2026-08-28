@@ -1085,20 +1085,30 @@ if (savedDrawerState === 'true') {
 }
 
 const themes = ['sepia', 'light', 'dark'];
-let currentThemeIndex = 0;
+
 function toggleTheme() {
-  currentThemeIndex = (currentThemeIndex + 1) % themes.length;
-  const newTheme = themes[currentThemeIndex];
-  document.documentElement.setAttribute('data-theme', newTheme);
-  localStorage.setItem(STORAGE_PREFIX + 'theme', newTheme);
-  localStorage.setItem('audible_reader_theme', newTheme);
-  localStorage.setItem('audible_theme', newTheme);
+  const current = document.documentElement.getAttribute('data-theme') || 'sepia';
+  const curIdx = themes.indexOf(current);
+  const next = themes[(curIdx >= 0 ? curIdx + 1 : 1) % themes.length];
+  setTheme(next);
 }
 
-const savedTheme = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || localStorage.getItem((window.__BOOK_ID__ || 'default') + '_theme');
+function setTheme(theme) {
+  if (!themes.includes(theme)) return;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(STORAGE_PREFIX + 'theme', theme);
+  localStorage.setItem('audible_reader_theme', theme);
+  localStorage.setItem('audible_theme', theme);
+  const themePreset = document.getElementById('themePreset');
+  if (themePreset) themePreset.value = theme;
+}
+
+window.toggleTheme = toggleTheme;
+window.setTheme = setTheme;
+
+const savedTheme = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || 'sepia';
 if (savedTheme && themes.includes(savedTheme)) {
-  document.documentElement.setAttribute('data-theme', savedTheme);
-  currentThemeIndex = themes.indexOf(savedTheme);
+  setTheme(savedTheme);
 }
 
 let currentFontSizeRem = 1.20;
