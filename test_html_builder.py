@@ -1,5 +1,6 @@
 import json
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +28,39 @@ def _make_release_token(tmp_path: Path):
 
 
 class HTMLBuilderTests(unittest.TestCase):
+    def test_generated_reader_has_valid_javascript_and_bookmark_contract(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            token, report_path = _make_release_token(tmp_path)
+            output = tmp_path / "reader.html"
+            build_master_reader(
+                "Test Book", "A Test", "Test Author", [{
+                    "num": 1,
+                    "title": "Chapter One",
+                    "audio": "./audio/chapter_01.mp3",
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
+                }], str(output), release_token=token, release_report_path=report_path,
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn('id="bookmarksToggleBtn"', rendered)
+            for function_name in (
+                "bookmarkSelection", "toggleSentenceBookmark", "updateBookmarksUI",
+                "refreshBookmarkButton", "jumpToBookmark", "toggleBookmarks",
+            ):
+                self.assertRegex(rendered, rf"function {function_name}\s*\(")
+
+            scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", rendered, re.DOTALL)
+            self.assertGreaterEqual(len(scripts), 2)
+            js_path = tmp_path / "reader.js"
+            js_path.write_text(scripts[-1], encoding="utf-8")
+            result = subprocess.run(
+                ["node", "--check", str(js_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_front_matter_labels_do_not_shift_printed_chapter_numbers(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             tmp_path = Path(temp_dir)
