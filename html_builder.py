@@ -430,6 +430,8 @@ body {{
     grid-template-columns: 1fr;
     gap: 12px;
   }}
+}}
+
 .selection-bookmark {{
   display: none;
   position: fixed;
