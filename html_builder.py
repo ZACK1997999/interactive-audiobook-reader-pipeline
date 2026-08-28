@@ -373,6 +373,11 @@ body {{
   display: block;
 }}
 
+.bookmark-list {{
+  max-height: 260px;
+  overflow-y: auto;
+}}
+
 .tips-columns {{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -752,6 +757,8 @@ body {{
         </div>
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
+      <button class="icon-btn" id="bookmarksToggleBtn" onclick="toggleBookmarks()">My bookmarks</button>
+      <div class="drawer-tips bookmark-list" id="bookmarkList"></div>
       <div class="drawer-tips" id="drawerTips">
         <div class="tips-columns">
           <div class="tips-section">
@@ -1051,6 +1058,7 @@ function switchChapter(chNum) {
   });
   rebuildSentenceTimeIndex();
   reportLibraryProgress(chNum, 0);
+  refreshBookmarkButton();
   
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1101,9 +1109,6 @@ function setFontSizePreset(value) {
   currentFontSizeRem = n;
   document.documentElement.style.setProperty('--font-size-base', n + 'rem');
   document.documentElement.style.setProperty('--reader-font-size', n + 'rem');
-  document.querySelectorAll('.s-content, .sentence-text').forEach(function(el) {
-    el.style.fontSize = n + 'rem';
-  });
   localStorage.setItem(STORAGE_PREFIX + 'font_size_preset', String(n));
   localStorage.setItem(STORAGE_PREFIX + 'font_size', String(n));
   const sel = document.getElementById('fontSizePreset');
@@ -1186,6 +1191,80 @@ function ensureInspectBookmarkButton(sentenceEl) {{
       btn.innerHTML = isBookmarked ? '★ Bookmarked' : '☆ Bookmark sentence';
     }}
   }}
+}}
+
+function updateBookmarksUI() {{
+  const list = document.getElementById('bookmarkList');
+  if (!list) return;
+  const allBookmarks = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
+  const bookmarks = allBookmarks.filter(bookmark => typeof bookmark === 'string' || bookmark.chapter === activeChapterNum);
+  if (!bookmarks.length) {{
+    list.innerHTML = '<div class="tips-row">No bookmarks in this chapter yet.</div>';
+    return;
+  }}
+  list.innerHTML = '';
+  bookmarks.forEach(bookmark => {{
+    const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
+    const sentence = document.getElementById(id);
+    if (!sentence) return;
+    const chapter = typeof bookmark === 'string' ? activeChapterNum : bookmark.chapter;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:5px 0;';
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'tips-row';
+    item.style.cssText = 'flex:1;border:0;background:transparent;text-align:left;cursor:pointer;padding:0;';
+    item.textContent = typeof bookmark === 'string' ? (sentence.dataset.text || id) : bookmark.text;
+    item.onclick = () => jumpToBookmark(id, chapter);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = 'Remove bookmark';
+    remove.style.cssText = 'border:0;background:transparent;color:var(--text-sub);cursor:pointer;font-size:1rem;';
+    remove.onclick = (event) => {{ event.stopPropagation(); removeBookmark(bookmark); }};
+    row.append(item, remove);
+    list.appendChild(row);
+  }});
+}}
+
+function removeBookmark(target) {{
+  const key = STORAGE_PREFIX + 'bookmarks';
+  const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
+  const targetId = typeof target === 'string' ? target : target.id;
+  const targetText = typeof target === 'string' ? null : target.text;
+  const remaining = bookmarks.filter(bookmark => {{
+    const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
+    const text = typeof bookmark === 'string' ? null : bookmark.text;
+    return !(id === targetId && (targetText === null || text === targetText));
+  }});
+  localStorage.setItem(key, JSON.stringify(remaining));
+  updateBookmarksUI();
+  refreshBookmarkButton();
+}}
+
+function refreshBookmarkButton() {{
+  const all = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
+  const count = all.filter(bookmark => typeof bookmark === 'string' || bookmark.chapter === activeChapterNum).length;
+  const button = document.getElementById('bookmarksToggleBtn');
+  if (button) button.textContent = count ? `My bookmarks (${count})` : 'My bookmarks';
+}}
+
+function toggleBookmarks() {{
+  const list = document.getElementById('bookmarkList');
+  if (!list) return;
+  const open = list.classList.toggle('open');
+  if (open) updateBookmarksUI();
+}}
+
+function jumpToBookmark(id, targetChapter) {{
+  const chapter = typeof targetChapter === 'number' ? targetChapter : activeChapterNum;
+  if (chapter !== activeChapterNum) switchChapter(chapter);
+  setTimeout(() => {{
+    const sentence = document.getElementById(id);
+    if (!sentence) return;
+    sentence.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+    sentence.click();
+  }}, 100);
 }}
 
 function toggleSentenceBookmark(id) {{
@@ -1469,6 +1548,10 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 """
+    # The tail is assembled from a mixture of f-string and plain-string
+    # fragments. Normalize escaped braces from the plain fragment before
+    # writing JavaScript to the generated document.
+    html_tail = html_tail.replace("{{", "{").replace("}}", "}")
     atomic_write_text(output_html_path, html_head + html_tail)
         
     print(f"Master multi-chapter interactive reader successfully compiled -> {output_html_path}")
