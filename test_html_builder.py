@@ -27,6 +27,46 @@ def _make_release_token(tmp_path: Path):
 
 
 class HTMLBuilderTests(unittest.TestCase):
+    def test_front_matter_labels_do_not_shift_printed_chapter_numbers(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            token, report_path = _make_release_token(tmp_path)
+            aligned = str(tmp_path / "book_ch01_aligned_sentences.json")
+            output = tmp_path / "reader.html"
+            build_master_reader(
+                "Test", "Study", "Author", [{
+                    "num": 1,
+                    "role": "introduction",
+                    "title": "How This Book Began",
+                    "audio": "./audio/chapter_01.mp3",
+                    "aligned_json": aligned,
+                }], str(output), release_token=token, release_report_path=report_path,
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn('<span class="chapter-item-tag">Introduction</span>', rendered)
+            self.assertIn('INTRODUCTION<br>How This Book Began', rendered)
+            self.assertNotIn('Chapter 1</span>', rendered)
+
+    def test_internal_track_number_can_differ_from_display_chapter_number(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            token, report_path = _make_release_token(tmp_path)
+            output = tmp_path / "reader.html"
+            build_master_reader(
+                "Test", "Study", "Author", [{
+                    "num": 1,
+                    "role": "chapter",
+                    "display_number": 7,
+                    "title": "Unity",
+                    "audio": "./audio/chapter_01.mp3",
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
+                }], str(output), release_token=token, release_report_path=report_path,
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn('<span class="chapter-item-tag">Chapter 7</span>', rendered)
+            self.assertIn('CHAPTER 7<br>Unity', rendered)
+            self.assertIn('id="chapter-1"', rendered)
+
     def test_zero_jitter_css_invariants(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             tmp_path = Path(temp_dir)

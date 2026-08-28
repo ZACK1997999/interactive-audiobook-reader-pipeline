@@ -229,6 +229,17 @@ def reconcile(chapters: Sequence[Dict], audios: Sequence[Dict], probes: Dict[str
             if (i, j) not in dp:
                 continue
             score, rows = dp[(i, j)]
+            if i < n:
+                # EPUB spines routinely contain cover, contents, bibliography,
+                # notes, index, and publisher pages that have no narration.
+                # Keep the skip visible in the approval plan instead of forcing
+                # a false match or hiding it in parser heuristics.
+                candidate = (
+                    score - 0.10,
+                    rows + [{"kind": "skip_chapter", "chapter_indices": [i], "confidence": 1.0}],
+                )
+                if candidate[0] > dp.get((i + 1, j), (-10**9, []))[0]:
+                    dp[(i + 1, j)] = candidate
             if j < m:
                 # Commercial extras are common.  Skipping one track should beat
                 # diluting a near-exact chapter match by grouping in unrelated

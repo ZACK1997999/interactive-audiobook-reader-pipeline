@@ -20,6 +20,32 @@ class PipelineSafetyTests(unittest.TestCase):
         )
         self.assertIsNone(_public_audio_url("https://cdn.example", None, 1))
 
+    def test_compiler_prefers_manifest_public_audio_url_over_local_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio").mkdir()
+            (root / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+            canonical = [{"id": "s-1", "text": "A sentence."}]
+            analysis = [{"id": "s-1", "text": "A sentence.", "trans": "一个句子。", "vocab": []}]
+            aligned = [{**analysis[0], "word_spans": [{"word": "A", "start": 0, "end": 1}], "raw_start": 0, "raw_end": 1, "has_audio_match": True, "fallback_used": False, "alignment_status": "validated", "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1}]
+            for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            (root / "audio" / "book_ch01_acoustic_words.json").write_text(
+                json.dumps({"words": [
+                    {"word": "A", "start": 0, "end": 1},
+                    {"word": "sentence", "start": 1, "end": 2},
+                    *[{"word": f"filler{i}", "start": 2 + i, "end": 3 + i} for i in range(80)],
+                ]}), encoding="utf-8"
+            )
+            from artifact_io import atomic_write_json
+            audio_manifest = {"entries": [{"chapter": 1, "source_path": str(root / "audio" / "chapter_01.mp3"), "source_sha256": __import__('hashlib').sha256((root / "audio" / "chapter_01.mp3").read_bytes()).hexdigest(), "bytes": 7, "public_url": "https://cdn.example/book/chapter_01.mp3"}]}
+            atomic_write_json(root / "audio_manifest.json", audio_manifest)
+            ready, output = auto_discover_and_build(root, book_title="Book", book_author="Author")
+            self.assertEqual(ready, 1)
+            rendered = Path(output).read_text(encoding="utf-8")
+            self.assertIn('data-public-audio="https://cdn.example/book/chapter_01.mp3"', rendered)
+            self.assertIn('data-audio="https://cdn.example/book/chapter_01.mp3"', rendered)
+
     def test_incomplete_analysis_blocks_compilation_and_records_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

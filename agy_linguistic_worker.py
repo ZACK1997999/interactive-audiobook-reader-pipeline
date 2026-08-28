@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +145,79 @@ def verify_analysis(data: Any, canonical_data: list[dict]) -> None:
                 raise RuntimeError(f"malformed vocabulary item in record {item_id}")
 
 
+def _process_single_batch(batch_idx: int, batch: list[dict], base_prompt: str, total_batches: int,
+                          cwd: Path, timeout: int, max_batch_attempts: int) -> list[dict]:
+    prompt = build_batch_prompt(base_prompt, batch, batch_idx, total_batches)
+    last_error = ""
+
+    for attempt in range(1, max_batch_attempts + 1):
+        try:
+            completed = subprocess.run(
+                ["agy", "--output-format", "text", "--print-timeout", "1h", "--print", prompt],
+                cwd=str(cwd),
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+            if completed.returncode != 0:
+                last_error = (completed.stderr or completed.stdout or "agy failed")[-4000:]
+                time.sleep(1)
+                continue
+
+            batch_result = _json_from_output(completed.stdout)
+            if not isinstance(batch_result, list):
+                last_error = "agy output must be a JSON list"
+                time.sleep(1)
+                continue
+
+            returned_map = {
+                item.get("id"): item
+                for item in batch_result
+                if isinstance(item, dict) and "id" in item
+            }
+            missing_items = [item for item in batch if item["id"] not in returned_map]
+
+            # Auto-heal missing sentences via a targeted sub-query
+            if missing_items and len(missing_items) <= 10:
+                sub_prompt = build_batch_prompt(base_prompt, missing_items, 0, 1)
+                try:
+                    sub_completed = subprocess.run(
+                        ["agy", "--output-format", "text", "--print-timeout", "1h", "--print", sub_prompt],
+                        cwd=str(cwd),
+                        text=True,
+                        capture_output=True,
+                        timeout=timeout,
+                    )
+                    if sub_completed.returncode == 0:
+                        sub_result = _json_from_output(sub_completed.stdout)
+                        if isinstance(sub_result, list):
+                            for s_item in sub_result:
+                                if isinstance(s_item, dict) and "id" in s_item:
+                                    returned_map[s_item["id"]] = s_item
+                except Exception:
+                    pass
+                missing_items = [item for item in batch if item["id"] not in returned_map]
+
+            if missing_items:
+                last_error = (
+                    f"agy returned {len(returned_map)} items, expected {len(batch)}; "
+                    f"missed {len(missing_items)} items: {[m['id'] for m in missing_items]}"
+                )
+                time.sleep(1)
+                continue
+
+            ordered_batch = [returned_map[item["id"]] for item in batch]
+            verify_analysis(ordered_batch, batch)
+            return ordered_batch
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
+            last_error = str(exc)
+            time.sleep(1)
+
+    raise RuntimeError(
+        f"agy failed on batch {batch_idx + 1}/{total_batches} after {max_batch_attempts} attempts: {last_error}"
+    )
+
+
 def process_canonical_sentences(
     canonical_data: list[dict],
     base_prompt: str,
@@ -151,85 +225,26 @@ def process_canonical_sentences(
     chunk_size: int = CHUNK_SIZE,
     timeout: int = 3700,
     max_batch_attempts: int = 3,
+    max_workers: int = 1,
 ) -> list[dict]:
     chunks = chunk_sentences(canonical_data, chunk_size=chunk_size)
     if not chunks:
         return []
 
+    if max_workers <= 0:
+        raise ValueError("max_workers must be positive")
+
     master_list: list[dict] = []
-    for batch_idx, batch in enumerate(chunks):
-        prompt = build_batch_prompt(base_prompt, batch, batch_idx, len(chunks))
-        batch_success = False
-        last_error = ""
-
-        for attempt in range(1, max_batch_attempts + 1):
-            try:
-                completed = subprocess.run(
-                    ["agy", "--mode", "plan", "--output-format", "text", "--print-timeout", "1h", "--print", prompt],
-                    cwd=str(cwd),
-                    text=True,
-                    capture_output=True,
-                    timeout=timeout,
-                )
-                if completed.returncode != 0:
-                    last_error = (completed.stderr or completed.stdout or "agy failed")[-4000:]
-                    time.sleep(1)
-                    continue
-
-                batch_result = _json_from_output(completed.stdout)
-                if not isinstance(batch_result, list):
-                    last_error = "agy output must be a JSON list"
-                    time.sleep(1)
-                    continue
-
-                returned_map = {
-                    item.get("id"): item
-                    for item in batch_result
-                    if isinstance(item, dict) and "id" in item
-                }
-                missing_items = [item for item in batch if item["id"] not in returned_map]
-
-                # Auto-heal missing sentences via a targeted sub-query
-                if missing_items and len(missing_items) <= 10:
-                    sub_prompt = build_batch_prompt(base_prompt, missing_items, 0, 1)
-                    try:
-                        sub_completed = subprocess.run(
-                            ["agy", "--mode", "plan", "--output-format", "text", "--print-timeout", "1h", "--print", sub_prompt],
-                            cwd=str(cwd),
-                            text=True,
-                            capture_output=True,
-                            timeout=timeout,
-                        )
-                        if sub_completed.returncode == 0:
-                            sub_result = _json_from_output(sub_completed.stdout)
-                            if isinstance(sub_result, list):
-                                for s_item in sub_result:
-                                    if isinstance(s_item, dict) and "id" in s_item:
-                                        returned_map[s_item["id"]] = s_item
-                    except Exception:
-                        pass
-                    missing_items = [item for item in batch if item["id"] not in returned_map]
-
-                if missing_items:
-                    last_error = (
-                        f"agy returned {len(returned_map)} items, expected {len(batch)}; "
-                        f"missed {len(missing_items)} items: {[m['id'] for m in missing_items]}"
-                    )
-                    time.sleep(1)
-                    continue
-
-                healed_batch = [returned_map[item["id"]] for item in batch]
-                master_list.extend(healed_batch)
-                batch_success = True
-                break
-            except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError) as exc:
-                last_error = str(exc)
-                time.sleep(1)
-
-        if not batch_success:
-            raise RuntimeError(
-                f"agy failed on batch {batch_idx + 1}/{len(chunks)} after {max_batch_attempts} attempts: {last_error}"
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(chunks))) as executor:
+        futures = [
+            executor.submit(
+                _process_single_batch,
+                batch_idx, batch, base_prompt, len(chunks), cwd, timeout, max_batch_attempts
             )
+            for batch_idx, batch in enumerate(chunks)
+        ]
+        for f in futures:
+            master_list.extend(f.result())
 
     verify_analysis(master_list, canonical_data)
     return master_list
@@ -250,6 +265,7 @@ def main(environ: dict[str, str] | None = None) -> int:
         canonical_data=canonical_data,
         base_prompt=base_prompt,
         cwd=canonical_path.parent,
+        max_workers=int(env.get("READER_LINGUISTIC_MAX_WORKERS", "1")),
     )
 
     atomic_write_json(output_path, analyzed_data)

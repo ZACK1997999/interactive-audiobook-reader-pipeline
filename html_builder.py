@@ -15,8 +15,11 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
                         *, release_token: ReleaseToken, release_report_path, book_id=None):
     """
     chapters_config: list of dicts with:
-      - 'num': int (e.g. 1, 2)
+      - 'num': unique internal track number (e.g. 0, 1, 2)
       - 'title': str (e.g. 'The Cult of the Head Start')
+      - 'role': optional 'preface', 'introduction', or 'chapter'
+      - 'display_number': optional printed chapter number for role='chapter'
+      - 'label': optional complete navigation/heading label override
       - 'audio': str (e.g. './audio/chapter_01.mp3')
       - 'aligned_json': str (path to aligned sentences JSON)
     """
@@ -43,9 +46,24 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
     for c in chapters_config:
         with open(c['aligned_json'], 'r', encoding='utf-8') as f:
             sents = json.load(f)
+        role = c.get('role', 'preface' if c['num'] == 0 else 'chapter')
+        display_number = c.get('display_number', c['num'] if role == 'chapter' else None)
+        label = c.get('label')
+        if not label:
+            if role == 'preface':
+                label = 'Preface'
+            elif role == 'introduction':
+                label = 'Introduction'
+            elif role == 'chapter' and display_number is not None:
+                label = f'Chapter {display_number}'
+            else:
+                label = c['title']
         loaded_chapters.append({
             'num': c['num'],
             'title': c['title'],
+            'role': role,
+            'display_number': display_number,
+            'label': str(label),
             'audio': c['audio'],
             'public_audio': c.get('public_audio'),
             'sentences': sents
@@ -60,6 +78,7 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="reader-release-report-sha256" content="{html.escape(release_token.report_sha256)}">
 <title>{html.escape(book_title)}: {html.escape(book_subtitle)}</title>
 <style>
 :root {{
@@ -589,7 +608,7 @@ body {{
     for ch in loaded_chapters:
         cnum = ch["num"]
         ctitle = ch["title"]
-        label = "Preface" if cnum == 0 else f"Chapter {cnum}"
+        label = ch["label"]
         active_cls = " active" if cnum == first_ch_num else ""
         html_head += f"""        <div class="chapter-item{active_cls}" id="menu-ch-{cnum}" onclick="switchChapter({cnum})">
           <span class="chapter-item-tag">{label}</span>
@@ -607,7 +626,7 @@ body {{
   
   <div class="control-drawer" id="controlDrawer">
     <div class="drawer-inner">
-      <audio id="audioTrack" controls preload="metadata"></audio>
+      <audio id="audioTrack" controls preload="metadata" src="{html.escape(first_ch_public_audio or first_ch_audio)}"></audio>
       <div class="drawer-row">
         <div class="drawer-group">
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
@@ -661,7 +680,7 @@ body {{
         cpublic_audio = ch.get("public_audio") or ""
         csents = ch["sentences"]
         active_cls = " active" if cnum == first_ch_num else ""
-        ch_heading_label = "PREFACE" if cnum == 0 else f"CHAPTER {cnum}"
+        ch_heading_label = ch["label"].upper()
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->

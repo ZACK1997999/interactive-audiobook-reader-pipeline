@@ -114,6 +114,39 @@ class AgyLinguisticWorkerTests(unittest.TestCase):
             verify_analysis(bad_vocab, canonical)
 
     @patch("subprocess.run")
+    def test_missing_translation_is_rejected_instead_of_fabricated(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps([{"id": "s-1", "text": "Source sentence.", "trans": "", "vocab": []}]),
+            stderr="",
+        )
+        with self.assertRaises(RuntimeError) as ctx:
+            process_canonical_sentences(
+                [{"id": "s-1", "text": "Source sentence."}],
+                "Analyze", Path("."), max_batch_attempts=1,
+            )
+        self.assertIn("missing or empty translation", str(ctx.exception))
+
+    @patch("subprocess.run")
+    def test_parallel_batches_preserve_canonical_order(self, mock_run):
+        def fake_run(cmd, **kwargs):
+            prompt = cmd[-1]
+            payload = prompt.split("```json\n", 1)[1].split("\n```", 1)[0]
+            batch = json.loads(payload)
+            analyzed = [
+                {"id": item["id"], "text": item["text"], "trans": f"译文 {item['id']}", "vocab": []}
+                for item in batch
+            ]
+            return MagicMock(returncode=0, stdout=json.dumps(analyzed), stderr="")
+
+        mock_run.side_effect = fake_run
+        canonical = [{"id": f"s-{i}", "text": f"Sentence {i}."} for i in range(8)]
+        result = process_canonical_sentences(
+            canonical, "Analyze", Path("."), chunk_size=2, max_workers=4,
+        )
+        self.assertEqual([item["id"] for item in result], [item["id"] for item in canonical])
+
+    @patch("subprocess.run")
     def test_120_sentence_chunking_and_merging_mock_subprocess(self, mock_run):
         # 120 canonical sentences
         canonical = [{"id": f"s-{i:03d}", "text": f"This is sentence {i}."} for i in range(1, 121)]
