@@ -616,41 +616,6 @@ body {{
   color: var(--accent);
 }}
 
-.inspect-actions {{
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border);
-}}
-
-.inspect-btn-bookmark {{
-  background: var(--bg-page);
-  border: 1px solid var(--border);
-  color: var(--accent);
-  font-family: var(--font-sans);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-}}
-
-.inspect-btn-bookmark:hover {{
-  background: var(--bg-hover);
-  border-color: var(--accent-light);
-}}
-
-.inspect-btn-bookmark.bookmarked {{
-  background: var(--accent);
-  color: #ffffff;
-  border-color: var(--accent);
-}}
-
 .v-pos {{
   font-size: 0.72rem;
   color: var(--text-sub);
@@ -1172,37 +1137,6 @@ function startSentenceShadowing(sentenceEl) {
   sentenceEl.classList.add('active');
 }
 
-function ensureInspectBookmarkButton(sentenceEl) {{
-  if (!sentenceEl) return;
-  const panel = sentenceEl.querySelector('.inspect-panel');
-  if (!panel) return;
-  let actions = panel.querySelector('.inspect-actions');
-  const allBookmarks = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
-  const isBookmarked = allBookmarks.some(b => (typeof b === 'string' ? b === sentenceEl.id : b.id === sentenceEl.id));
-
-  if (!actions) {{
-    actions = document.createElement('div');
-    actions.className = 'inspect-actions';
-    actions.onclick = (e) => e.stopPropagation();
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'inspect-btn-bookmark' + (isBookmarked ? ' bookmarked' : '');
-    btn.innerHTML = isBookmarked ? '★ Bookmarked' : '☆ Bookmark sentence';
-    btn.onclick = (e) => {{
-      e.stopPropagation();
-      toggleSentenceBookmark(sentenceEl.id);
-    }};
-    actions.appendChild(btn);
-    panel.appendChild(actions);
-  }} else {{
-    const btn = actions.querySelector('.inspect-btn-bookmark');
-    if (btn) {{
-      btn.className = 'inspect-btn-bookmark' + (isBookmarked ? ' bookmarked' : '');
-      btn.innerHTML = isBookmarked ? '★ Bookmarked' : '☆ Bookmark sentence';
-    }}
-  }}
-}}
-
 function updateBookmarksUI() {{
   const list = document.getElementById('bookmarkList');
   if (!list) return;
@@ -1242,10 +1176,13 @@ function removeBookmark(target) {{
   const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
   const targetId = typeof target === 'string' ? target : target.id;
   const targetText = typeof target === 'string' ? null : target.text;
+  const targetChapter = typeof target === 'string' ? null : target.chapter;
   const remaining = bookmarks.filter(bookmark => {{
     const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
     const text = typeof bookmark === 'string' ? null : bookmark.text;
-    return !(id === targetId && (targetText === null || text === targetText));
+    const chapter = typeof bookmark === 'string' ? null : bookmark.chapter;
+    return !(id === targetId && (targetText === null || text === targetText) &&
+      (targetChapter === null || chapter === targetChapter));
   }});
   localStorage.setItem(key, JSON.stringify(remaining));
   updateBookmarksUI();
@@ -1277,31 +1214,6 @@ function jumpToBookmark(id, targetChapter) {{
   }}, 100);
 }}
 
-function toggleSentenceBookmark(id) {{
-  const sentence = document.getElementById(id);
-  if (!sentence) return;
-  const text = sentence.dataset.text || sentence.querySelector('.s-content')?.textContent?.trim() || sentence.id;
-  const key = STORAGE_PREFIX + 'bookmarks';
-  const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
-  const existingIdx = bookmarks.findIndex(b => (typeof b === 'string' ? b === id : b.id === id));
-  if (existingIdx >= 0) {{
-    bookmarks.splice(existingIdx, 1);
-  }} else {{
-    bookmarks.push({{
-      id: sentence.id,
-      text: text,
-      chapter: activeChapterNum,
-      savedAt: new Date().toISOString()
-    }});
-  }}
-  localStorage.setItem(key, JSON.stringify(bookmarks));
-  ensureInspectBookmarkButton(sentence);
-  if (typeof refreshBookmarkButton === 'function') refreshBookmarkButton();
-  if (document.getElementById('bookmarkList')?.classList.contains('open')) {{
-    if (typeof updateBookmarksUI === 'function') updateBookmarksUI();
-  }}
-}}
-
 function handleSentenceClick(event, id, start, end, hasMatch) {{
   if (event) event.stopPropagation();
   const el = document.getElementById(id);
@@ -1324,7 +1236,6 @@ function handleSentenceClick(event, id, start, end, hasMatch) {{
     globalPlayBtn.textContent = '⏸ Pause';
   }}
   el.classList.add('active');
-  ensureInspectBookmarkButton(el);
 }}
 
 function handleInspectPanelClick(event, id) {

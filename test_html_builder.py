@@ -43,11 +43,15 @@ class HTMLBuilderTests(unittest.TestCase):
             )
             rendered = output.read_text(encoding="utf-8")
             self.assertIn('id="bookmarksToggleBtn"', rendered)
+            self.assertNotIn('inspect-actions', rendered)
+            self.assertIn('id="bookmarkList"', rendered)
             for function_name in (
-                "bookmarkSelection", "toggleSentenceBookmark", "updateBookmarksUI",
+                "bookmarkSelection", "updateBookmarksUI",
                 "refreshBookmarkButton", "jumpToBookmark", "toggleBookmarks",
             ):
                 self.assertRegex(rendered, rf"function {function_name}\s*\(")
+            self.assertIn("chapter === targetChapter", rendered)
+            self.assertIn("text === targetText", rendered)
 
             scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", rendered, re.DOTALL)
             self.assertGreaterEqual(len(scripts), 2)
