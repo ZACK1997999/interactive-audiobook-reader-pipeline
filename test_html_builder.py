@@ -52,6 +52,8 @@ class HTMLBuilderTests(unittest.TestCase):
                 self.assertRegex(rendered, rf"function {function_name}\s*\(")
             self.assertIn("chapter === targetChapter", rendered)
             self.assertIn("text === targetText", rendered)
+            self.assertIn("window.addEventListener('storage'", rendered)
+            self.assertIn("--bg-page: #12151c", rendered)
 
             scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", rendered, re.DOTALL)
             self.assertGreaterEqual(len(scripts), 2)

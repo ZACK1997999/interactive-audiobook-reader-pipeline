@@ -83,7 +83,7 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 <script>
 (function() {{
   var bId = {json.dumps(book_id)};
-  var t = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem('reader_' + bId + '_theme') || localStorage.getItem(bId + '_theme');
+  var t = localStorage.getItem('audible_theme') || localStorage.getItem('audible_reader_theme') || localStorage.getItem('reader_' + bId + '_theme') || localStorage.getItem(bId + '_theme');
   if (t && (t === 'sepia' || t === 'light' || t === 'dark')) {{
     document.documentElement.setAttribute('data-theme', t);
   }}
@@ -1071,10 +1071,18 @@ function setTheme(theme) {
 window.toggleTheme = toggleTheme;
 window.setTheme = setTheme;
 
-const savedTheme = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || 'sepia';
+const savedTheme = localStorage.getItem('audible_theme') || localStorage.getItem('audible_reader_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || 'sepia';
 if (savedTheme && themes.includes(savedTheme)) {
   setTheme(savedTheme);
 }
+window.addEventListener('storage', event => {{
+  if (event.key !== 'audible_theme' && event.key !== 'audible_reader_theme') return;
+  if (themes.includes(event.newValue) && event.newValue !== document.documentElement.getAttribute('data-theme')) {{
+    document.documentElement.setAttribute('data-theme', event.newValue);
+    const themePreset = document.getElementById('themePreset');
+    if (themePreset) themePreset.value = event.newValue;
+  }}
+}});
 
 let currentFontSizeRem = 1.20;
 
