@@ -3,9 +3,12 @@ Module: acoustic_whisper.py
 Description: Apple Silicon GPU-Accelerated MLX Whisper Word Timestamp Extractor.
 """
 
+import hashlib
 import json
+import math
 import time
 import sys
+from pathlib import Path
 from artifact_io import atomic_write_json
 
 ACOUSTIC_PROFILE_VERSION = 2
@@ -49,6 +52,12 @@ def run_mlx_acoustic_extraction(
             "text": seg.get("text")
         })
         for w in seg.get("words", []):
+            if not isinstance(w.get("word"), str) or not w.get("word").strip():
+                raise ValueError("acoustic backend returned a word without text")
+            if not isinstance(w.get("start"), (int, float)) or not isinstance(w.get("end"), (int, float)):
+                raise ValueError("acoustic backend returned a word without timestamps")
+            if not math.isfinite(float(w["start"])) or not math.isfinite(float(w["end"])) or float(w["end"]) <= float(w["start"]):
+                raise ValueError("acoustic backend returned an invalid word timestamp")
             words_list.append({
                 "word": w.get("word"),
                 "start": round(w.get("start", 0.0), 2),
@@ -60,6 +69,7 @@ def run_mlx_acoustic_extraction(
         "schema_version": 2,
         "acoustic_profile_version": ACOUSTIC_PROFILE_VERSION,
         "model": model_name,
+        "source_audio_sha256": hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if Path(audio_path).is_file() else None,
         "transcription_options": ACOUSTIC_TRANSCRIPTION_OPTIONS,
         "word_timestamps": True,
         "segments": segments_list,

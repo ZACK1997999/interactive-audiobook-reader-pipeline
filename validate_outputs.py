@@ -1,10 +1,14 @@
 """Release gate for reader data; diagnostics stay outside the reader."""
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from audio_resolver import resolve_chapter_audio
+from acoustic_whisper import ACOUSTIC_PROFILE_VERSION
 from artifact_io import atomic_write_json
 from release_token import issue_release_token
 
@@ -13,6 +17,50 @@ ABBREVIATION_BEFORE_CAPITAL = re.compile(
     r"(?:Mrs|Mr|Ms|Dr|Prof|Sr|Jr|Rev|Hon|Gen|Col|Maj|Capt|Lt|Sgt|Cpl|Pvt|Gov|Sen|Rep|Pres|Sec|Amb|Insp|Det|St|Mt|Ft|Mme|Mlle|Esq|Ph\.D|M\.D|B\.A|M\.A|U\.S|U\.K|U\.S\.A|e\.g|i\.e|vs|etc|al|fig|pp|vol|no|Jan|Feb|Mar|Apr|Aug|Sept|Oct|Nov|Dec|\b[A-Z])$"
 )
 MIN_CHAPTER_AUDIO_COVERAGE = 0.95
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_provenance(book_dir: Path, errors: list[str]):
+    """Require explicit audio and run manifests for production validation."""
+    audio_path = book_dir / "audio_manifest.json"
+    run_path = book_dir / "reader_run_manifest.json"
+    if not audio_path.is_file():
+        errors.append("audio_manifest.json is required for provenance validation")
+        return {}, {}
+    if not run_path.is_file():
+        errors.append("reader_run_manifest.json is required for provenance validation")
+        return {}, {}
+    try:
+        audio_manifest = json.loads(audio_path.read_text(encoding="utf-8"))
+        run_manifest = json.loads(run_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        errors.append(f"provenance manifest invalid: {exc}")
+        return {}, {}
+    entries = audio_manifest.get("entries") if isinstance(audio_manifest, dict) else None
+    chapters = run_manifest.get("chapters") if isinstance(run_manifest, dict) else None
+    if not isinstance(entries, list) or not entries:
+        errors.append("audio_manifest.json must contain a non-empty entries list")
+    if not isinstance(chapters, list) or not chapters:
+        errors.append("reader_run_manifest.json must contain chapter entries")
+    if not isinstance(run_manifest.get("pipeline_revision"), str) or not run_manifest.get("pipeline_revision"):
+        errors.append("reader_run_manifest.json is missing pipeline_revision")
+    audio_by_chapter = {}
+    for entry in entries or []:
+        chapter = entry.get("chapter") if isinstance(entry, dict) else None
+        source = Path(entry.get("source_path", "")).expanduser() if isinstance(entry, dict) else Path("")
+        expected = entry.get("source_sha256") if isinstance(entry, dict) else None
+        if not isinstance(chapter, int) or not source.is_file() or not isinstance(expected, str) or _sha256(source) != expected:
+            errors.append(f"audio_manifest.json: source hash invalid for chapter {chapter}")
+        else:
+            audio_by_chapter[chapter] = (source, expected)
+    return ({item.get("chapter"): item for item in chapters or [] if isinstance(item, dict)}, audio_by_chapter)
 
 
 def _suspicious_sentence_boundaries(text: str) -> list[str]:
@@ -63,7 +111,7 @@ def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, st
     return decisions
 
 
-def validate(book_dir: Path, report_path=None):
+def validate(book_dir: Path, report_path=None, *, require_provenance=False):
     errors, warnings, chapters = [], [], []
     review_ledger = _load_review_ledger(book_dir, errors)
     if review_ledger:
@@ -82,6 +130,8 @@ def validate(book_dir: Path, report_path=None):
             manifest_entries = {item.get("chapter"): item for item in manifest.get("chapters", [])}
         except (OSError, ValueError, TypeError):
             errors.append("reader_run_manifest.json: invalid JSON")
+    if require_provenance:
+        manifest_entries, audio_manifest_entries = _validate_provenance(book_dir, errors)
     canonical_files = sorted(book_dir.glob("*_ch*_canonical_sentences.json"))
     if not canonical_files:
         errors.append("No canonical sentence files found")
@@ -149,6 +199,27 @@ def validate(book_dir: Path, report_path=None):
 
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
         manifest_entry = manifest_entries.get(number, {})
+        if require_provenance:
+            acoustic = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+            expected = {
+                "canonical_sha256": _sha256(canonical),
+                "analysis_sha256": _sha256(analysis) if analysis.exists() else None,
+                "acoustic_sha256": _sha256(acoustic) if acoustic.exists() else None,
+                "aligned_sha256": _sha256(aligned) if aligned.exists() else None,
+                "audio_sha256": (audio_manifest_entries.get(number) or (None, None))[1],
+            }
+            for field, actual in expected.items():
+                if manifest_entry.get(field) != actual:
+                    errors.append(f"{label}: provenance hash mismatch for {field}")
+            if acoustic.exists():
+                try:
+                    acoustic_data = json.loads(acoustic.read_text(encoding="utf-8"))
+                    if acoustic_data.get("acoustic_profile_version") != ACOUSTIC_PROFILE_VERSION:
+                        errors.append(f"{label}: acoustic profile is stale or missing")
+                    if audio_manifest_entries.get(number) and acoustic_data.get("source_audio_sha256") != audio_manifest_entries[number][1]:
+                        errors.append(f"{label}: acoustic source audio hash mismatch")
+                except (OSError, ValueError, TypeError):
+                    errors.append(f"{label}: acoustic artifact cannot be read for provenance")
         expected_hash = manifest_entry.get("aligned_sha256")
         if expected_hash and aligned.exists():
             import hashlib
@@ -270,7 +341,17 @@ def validate(book_dir: Path, report_path=None):
             record["status"] = "validated"
         chapters.append(record)
 
-    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "accepted_review_exceptions": accepted_exceptions, "non_narrated_reviews": non_narrated_reviews, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
+    result = {
+        "book_dir": str(book_dir.resolve()),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "pipeline_revision": (json.loads((book_dir / "reader_run_manifest.json").read_text(encoding="utf-8")).get("pipeline_revision") if require_provenance and (book_dir / "reader_run_manifest.json").exists() else None),
+        "chapters": chapters,
+        "accepted_review_exceptions": accepted_exceptions,
+        "non_narrated_reviews": non_narrated_reviews,
+        "errors": errors,
+        "warnings": warnings,
+        "release_ready": not errors and not warnings,
+    }
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if report_path:
@@ -278,9 +359,9 @@ def validate(book_dir: Path, report_path=None):
     return 0 if result["release_ready"] else 1
 
 
-def validate_for_release(book_dir: Path, report_path: Path):
+def validate_for_release(book_dir: Path, report_path: Path, *, require_provenance=False):
     """Validate and return (report, token); a failed gate returns no token."""
-    code = validate(book_dir, report_path)
+    code = validate(book_dir, report_path, require_provenance=require_provenance)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if code != 0:
         return report, None
@@ -291,8 +372,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("book_dir", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--require-provenance", action="store_true")
     args = parser.parse_args()
-    return validate(args.book_dir.expanduser().resolve(), args.report)
+    return validate(args.book_dir.expanduser().resolve(), args.report, require_provenance=args.require_provenance)
 
 
 if __name__ == "__main__":

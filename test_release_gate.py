@@ -30,6 +30,12 @@ class ReleaseGateTests(unittest.TestCase):
             self._write_fixture(root)
             self.assertEqual(validate(root), 0)
 
+    def test_provenance_mode_requires_manifests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            self.assertNotEqual(validate(root, require_provenance=True), 0)
+
     def test_review_required_fixture_blocks_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -18,6 +18,7 @@ import time
 import json
 import subprocess
 import threading
+import hashlib
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -30,8 +31,8 @@ from agy_linguistic_worker import process_canonical_sentences, PROMPT_PATH
 from dynamic_aligner import align_sentences_with_audio
 from validate_outputs import validate_for_release
 from html_builder import build_master_reader
-import shutil
 from quality_gate import smoke_check_html, validate_semantic_review
+from manifests import build_audio_manifest, write_audio_manifest
 from run_manifest import update_manifest
 from artifact_io import atomic_write_json
 from chapter_metadata import load_chapter_metadata
@@ -39,6 +40,52 @@ from chapter_metadata import load_chapter_metadata
 BOOK_DIR = Path('/Users/lindy/Vault/audiobook/Fourth Wing').resolve()
 AUDIO_DIR = BOOK_DIR / 'audio'
 TOTAL_CHAPTERS = 39
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _chapter_hashes(ch: int):
+    prefix = f"fourth_wing_ch{ch:02d}"
+    paths = {
+        "canonical_sha256": BOOK_DIR / f"{prefix}_canonical_sentences.json",
+        "analysis_sha256": BOOK_DIR / f"{prefix}_full_analysis.json",
+        "acoustic_sha256": AUDIO_DIR / f"{prefix}_acoustic_words.json",
+        "aligned_sha256": BOOK_DIR / f"{prefix}_aligned_sentences.json",
+        "audio_sha256": AUDIO_DIR / f"chapter_{ch:02d}.mp3",
+    }
+    return {key: _sha256(path) if path.is_file() else None for key, path in paths.items()}
+
+
+def _write_run_manifest(status: str):
+    rows = []
+    for ch in range(1, TOTAL_CHAPTERS + 1):
+        rows.append({"chapter": ch, **_chapter_hashes(ch)})
+    input_files = [("prompt", PROMPT_PATH)]
+    for ch in range(1, TOTAL_CHAPTERS + 1):
+        input_files.extend([
+            ("canonical", BOOK_DIR / f"fourth_wing_ch{ch:02d}_canonical_sentences.json"),
+            ("audio", AUDIO_DIR / f"chapter_{ch:02d}.mp3"),
+        ])
+    return update_manifest(BOOK_DIR, rows, status=status, input_files=input_files)
+
+
+def _alignment_is_current(ch: int, aligned_path: Path) -> bool:
+    manifest_path = BOOK_DIR / "reader_run_manifest.json"
+    if not aligned_path.is_file() or not manifest_path.is_file():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = next(item for item in manifest.get("chapters", []) if item.get("chapter") == ch)
+    except (OSError, ValueError, TypeError, StopIteration):
+        return False
+    current = _chapter_hashes(ch)
+    return all(entry.get(key) == value for key, value in current.items())
 
 
 def _is_acoustic_ready(path: Path, *, require_current_profile: bool = False) -> bool:
@@ -147,13 +194,7 @@ def run_alignment_check(ch: int) -> bool:
     if not _is_acoustic_ready(acoustic_path, require_current_profile=True):
         return False
 
-    needs_align = not aligned_path.is_file()
-    if not needs_align:
-        if (
-            acoustic_path.stat().st_mtime > aligned_path.stat().st_mtime
-            or analysis_path.stat().st_mtime > aligned_path.stat().st_mtime
-        ):
-            needs_align = True
+    needs_align = not _alignment_is_current(ch, aligned_path)
 
     if needs_align:
         print(f'[Alignment] Aligning Chapter {ch:02d} ({prefix})...', flush=True)
@@ -189,6 +230,16 @@ def run_pipeline():
     print('      Starting Industrial End-to-End Pipeline for Fourth Wing (39 Chapters)     ', flush=True)
     print('================================================================================', flush=True)
 
+    audio_files = [AUDIO_DIR / f"chapter_{ch:02d}.mp3" for ch in range(1, TOTAL_CHAPTERS + 1)]
+    if not all(path.is_file() for path in audio_files):
+        print("[ERROR] Explicit chapter audio set is incomplete; halting before processing.", file=sys.stderr, flush=True)
+        return 1
+    write_audio_manifest(
+        BOOK_DIR / "audio_manifest.json",
+        build_audio_manifest(AUDIO_DIR, "fourth-wing", chapter_count=TOTAL_CHAPTERS, source_files=audio_files),
+    )
+    _write_run_manifest("prepared")
+
     base_prompt = PROMPT_PATH.read_text(encoding='utf-8')
 
     # Start Acoustic Worker in a dedicated background thread
@@ -216,21 +267,38 @@ def run_pipeline():
 
     if not all_aligned:
         print('[ERROR] Not all chapters were aligned successfully. Halting release.', file=sys.stderr, flush=True)
+        _write_run_manifest("blocked")
         return 1
 
     run_bounded_acoustic_repairs()
+    _write_run_manifest("validation")
 
     # Quality Gate Validation & Compilation
     print("\n=== [Running Release Quality Gate] ===", flush=True)
     report_path = BOOK_DIR / "reader_validation_report.json"
-    report, release_token = validate_for_release(BOOK_DIR, report_path)
+    report, release_token = validate_for_release(BOOK_DIR, report_path, require_provenance=True)
     if release_token is None:
         print(f"[ERROR] Release gate blocked! See report at: {report_path}", file=sys.stderr, flush=True)
+        _write_run_manifest("blocked")
         return 1
 
     print(f"[Quality Gate Passed] Generated Release Token: {release_token}", flush=True)
 
-    # Build Master Interactive Reader
+    # Semantic review is a release prerequisite, not a post-build warning.
+    print("\n=== [Running Semantic Quality Gate Check] ===", flush=True)
+    semantic_path = BOOK_DIR / "reader_semantic_review.json"
+    if not semantic_path.exists():
+        print("[ERROR] reader_semantic_review.json is required before compilation.", file=sys.stderr, flush=True)
+        _write_run_manifest("blocked")
+        return 1
+    sem_check = validate_semantic_review(semantic_path, required_chapters=[1, 18, 25, 36, 39])
+    if sem_check["status"] != "passed":
+        print(f"[ERROR] Semantic review validation failed: {sem_check['errors']}", file=sys.stderr, flush=True)
+        _write_run_manifest("blocked")
+        return 1
+    print(f"[SUCCESS] Semantic Review Verified with {sem_check['sample_count']} sampled chapters!", flush=True)
+
+    # Build Master Interactive Reader only after all release prerequisites pass.
     print("\n=== [Compiling Master Multi-Chapter Interactive Reader HTML] ===", flush=True)
     master_html_path = BOOK_DIR / "Fourth_Wing_Interactive_Reader.html"
     metadata_path = BOOK_DIR / "chapter_metadata.json"
@@ -260,54 +328,21 @@ def run_pipeline():
         book_id="fourth-wing",
     )
 
-    # Semantic Quality Review Check
-    print("\n=== [Running Semantic Quality Gate Check] ===", flush=True)
-    semantic_path = BOOK_DIR / "reader_semantic_review.json"
-    if semantic_path.exists():
-        sem_check = validate_semantic_review(semantic_path, required_chapters=[1, 18, 25, 36, 39])
-        if sem_check["status"] != "passed":
-            print(f"[ERROR] Semantic review validation failed: {sem_check['errors']}", file=sys.stderr, flush=True)
-            return 1
-        print(f"[SUCCESS] Semantic Review Verified with {sem_check['sample_count']} sampled chapters!", flush=True)
-    else:
-        print("[WARNING] reader_semantic_review.json not found! Semantic quality check skipped.", file=sys.stderr, flush=True)
-
     # Smoke Check on Master HTML
     print("\n=== [Running Reader Smoke Check] ===", flush=True)
     smoke = smoke_check_html(master_html_path, expected_chapters=TOTAL_CHAPTERS)
     if smoke["status"] != "passed":
         print(f"[ERROR] Reader smoke check failed: {smoke['errors']}", file=sys.stderr, flush=True)
+        _write_run_manifest("blocked")
         return 1
 
     print(f"\n[SUCCESS] Reader Smoke Check Passed with 0 errors! Total chapters: {smoke['chapter_count']}", flush=True)
     print(f"[SUCCESS] Standalone Interactive Reader compiled at: {master_html_path}", flush=True)
 
-    # Synchronize & Deploy to Audible Portal
-    print("\n=== [Deploying & Synchronizing to Audible Central Portal] ===", flush=True)
-    audible_book_dir = Path("/Users/lindy/Vault/Audible/books/fourth-wing")
-    audible_book_dir.mkdir(parents=True, exist_ok=True)
-    audible_html_path = audible_book_dir / "index.html"
-    shutil.copy2(master_html_path, audible_html_path)
-
-    # Ensure Audio Symlink
-    audible_audio_link = audible_book_dir / "audio"
-    if not audible_audio_link.exists():
-        try:
-            audible_audio_link.symlink_to(BOOK_DIR / "audio", target_is_directory=True)
-            print(f"[Audible Portal] Created audio symlink -> {audible_audio_link}", flush=True)
-        except Exception as e:
-            print(f"[WARNING] Could not create audio symlink: {e}", file=sys.stderr, flush=True)
-
-    # Run Smoke Check on Deployed Portal Reader
-    portal_smoke = smoke_check_html(audible_html_path, expected_chapters=TOTAL_CHAPTERS)
-    if portal_smoke["status"] != "passed":
-        print(f"[ERROR] Audible portal smoke check failed: {portal_smoke['errors']}", file=sys.stderr, flush=True)
-        return 1
-    print(f"[SUCCESS] Audible Portal Deployment Verified at {audible_html_path}", flush=True)
-
     print("================================================================================", flush=True)
-    print("                     ALL 39 CHAPTERS PROCESSED SUCCESSFULLY                     ", flush=True)
+    print("                     ALL 39 CHAPTERS COMPILED AND VERIFIED                    ", flush=True)
     print("================================================================================", flush=True)
+    _write_run_manifest("compiled")
     return 0
 
 
