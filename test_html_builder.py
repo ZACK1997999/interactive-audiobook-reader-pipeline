@@ -299,19 +299,12 @@ class HTMLBuilderTests(unittest.TestCase):
             ]
             analysis = [{**item, "trans": "译文", "vocab": []} for item in canonical]
             aligned = [
-                {**analysis[0], "word_spans": [], "raw_start": 0, "raw_end": 0, "has_audio_match": False, "alignment_status": "validated", "fallback_used": True, "matched_token_count": 0, "source_token_count": 4, "match_ratio": 0},
-                {**analysis[1], "word_spans": [], "raw_start": 0, "raw_end": 0, "has_audio_match": False, "alignment_status": "validated", "fallback_used": True, "matched_token_count": 0, "source_token_count": 2, "match_ratio": 0},
+                {**analysis[0], "word_spans": [], "raw_start": None, "raw_end": None, "has_audio_match": False, "alignment_status": "not-applicable", "alignment_reason": "non_narrated_content", "fallback_used": False, "matched_token_count": 0, "source_token_count": 4, "match_ratio": 0},
+                {**analysis[1], "word_spans": [], "raw_start": None, "raw_end": None, "has_audio_match": False, "alignment_status": "not-applicable", "alignment_reason": "non_narrated_content", "fallback_used": False, "matched_token_count": 0, "source_token_count": 2, "match_ratio": 0},
                 {**analysis[2], "word_spans": [{"word": "First", "start": 0, "end": 1}], "raw_start": 0, "raw_end": 1, "has_audio_match": True, "alignment_status": "validated", "fallback_used": False, "matched_token_count": 3, "source_token_count": 3, "match_ratio": 1},
             ]
             for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
                 (tmp_path / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
-            (tmp_path / "reader_review_ledger.json").write_text(json.dumps({
-                "schema_version": 1,
-                "reviews": [
-                    {"chapter": 1, "sentence_id": "s-1", "decision": "accepted", "reviewer": "owner", "evidence": "Epigraph citation"},
-                    {"chapter": 1, "sentence_id": "s-2", "decision": "accepted", "reviewer": "owner", "evidence": "Printed chapter heading"},
-                ]
-            }), encoding="utf-8")
             report_path = tmp_path / "reader_validation_report.json"
             _, token = validate_for_release(tmp_path, report_path)
 
@@ -335,4 +328,3 @@ class HTMLBuilderTests(unittest.TestCase):
             self.assertNotIn('CHAPTER 1<br>Chapter 1', rendered)
             self.assertIn('class="sentence-text epigraph-citation"', rendered)
             self.assertIn('class="sentence-text chapter-intext-heading"', rendered)
-

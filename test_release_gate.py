@@ -50,7 +50,7 @@ class ReleaseGateTests(unittest.TestCase):
             report = json.loads((root / "reader_validation_report.json").read_text(encoding="utf-8")) if (root / "reader_validation_report.json").exists() else None
             self.assertIsNone(report)
 
-    def test_owner_review_ledger_accepts_explicit_audio_exception(self):
+    def test_owner_review_ledger_blocks_release_instead_of_waiving_alignment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_fixture(root)
@@ -69,9 +69,9 @@ class ReleaseGateTests(unittest.TestCase):
                     "evidence": "Reviewed audiobook wording discrepancy.",
                 }],
             }), encoding="utf-8")
-            self.assertEqual(validate(root), 0)
+            self.assertNotEqual(validate(root), 0)
 
-    def test_accepted_unmatched_record_does_not_poison_timeline_order(self):
+    def test_unmatched_record_blocks_release_without_manual_waiver(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "audio").mkdir()
@@ -93,7 +93,7 @@ class ReleaseGateTests(unittest.TestCase):
                 "schema_version": 1,
                 "reviews": [{"chapter": 1, "sentence_id": "s-2", "decision": "accepted", "reviewer": "project_owner", "evidence": "Verified as print-only content between narrated anchors."}],
             }), encoding="utf-8")
-            self.assertEqual(validate(root), 0)
+            self.assertNotEqual(validate(root), 0)
 
     def test_reviewed_out_of_order_alignment_can_release(self):
         with tempfile.TemporaryDirectory() as tmp:

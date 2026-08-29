@@ -798,9 +798,11 @@ body {{
             raw_sid = s["id"]
             sid = f"c{cnum}-{raw_sid}"
             is_h = s.get("is_heading", False)
-            start = s.get("start", 0.0)
-            end = s.get("end", 0.0)
-            has_match = 1 if s.get("has_audio_match", True) and (end > start) else 0
+            start = s.get("audio_start", s.get("start"))
+            end = s.get("audio_end", s.get("end"))
+            has_match = 1 if s.get("has_audio_match", True) and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else 0
+            start_arg = "null" if start is None else str(start)
+            end_arg = "null" if end is None else str(end)
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
             raw_text = s.get("text", "")
@@ -815,7 +817,7 @@ body {{
                     word_html_list.append(f'<span class="w" data-s="{ws}" data-e="{we}">{rw}</span>')
             else:
                 for rw in s["text"].split():
-                    word_html_list.append(f'<span class="w" data-s="{start}" data-e="{end}">{html.escape(rw)}</span>')
+                    word_html_list.append(f'<span class="w" data-s="{start_arg}" data-e="{end_arg}">{html.escape(rw)}</span>')
             
             sentence_text_html = " ".join(word_html_list)
             
@@ -838,8 +840,8 @@ body {{
             elif raw_text.strip().startswith(("—", "–", "--", "- ")):
                 h_class += " epigraph-citation"
             html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
-        <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
+      <div class="sentence-unit" id="{sid}" data-start="{start_arg}" data-end="{end_arg}" data-audio-order="{s.get('audio_order', '')}" data-epigraph="{1 if s.get('alignment_method') == 'leading_epigraph_attribution' else 0}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
+        <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start_arg}, {end_arg}, {has_match})">
           <span class="s-content">{sentence_text_html}</span>
         </div>
         <div class="inspect-panel" onclick="handleInspectPanelClick(event, '{sid}')" title="Click to collapse / 点击折叠">
@@ -1007,7 +1009,7 @@ function rebuildSentenceTimeIndex() {
     start: parseFloat(el.dataset.start || '0'),
     end: parseFloat(el.dataset.end || '0'),
     el: el
-  })).filter(item => item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
+  })).filter(item => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
 }
 
 function findSentenceAt(time) {
@@ -1271,7 +1273,7 @@ function handleSentenceClick(event, id, start, end, hasMatch) {{
   }}
   
   localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
-  if (start > 0 || hasMatch) {{
+  if (hasMatch && Number.isFinite(start) && Number.isFinite(end) && end > start) {{
     audio.currentTime = start;
     audio.play();
     globalPlayBtn.textContent = '⏸ Pause';

@@ -28,7 +28,9 @@ class AlignmentEvidenceTests(unittest.TestCase):
         words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("noise only one token here".split())]
         item = self.run_alignment(words, [{"id": "s-1", "text": "one entirely different sentence"}])[0]
         self.assertEqual(item["alignment_status"], "review-required")
-        self.assertTrue(item["fallback_used"])
+        self.assertFalse(item["fallback_used"])
+        self.assertIsNone(item["start"])
+        self.assertIsNone(item["end"])
 
     def test_out_of_order_global_match_requires_review(self):
         words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate("second exact phrase filler first exact phrase".split())]
@@ -75,3 +77,28 @@ class AlignmentEvidenceTests(unittest.TestCase):
         self.assertEqual(item["alignment_status"], "validated")
         self.assertEqual(item["matched_token_count"], 4)
         self.assertEqual(item["word_spans"][1]["start"], 1)
+
+    def test_real_chapter_two_leading_attribution_is_bound_before_printed_quote(self):
+        words = [{"word": word, "start": start, "end": end} for word, start, end in [
+            ("Chapter", 0.0, 0.6), ("2.", 0.6, 0.9),
+            ("A", 3.04, 3.76), ("quote", 3.76, 4.14), ("from", 4.14, 4.54),
+            ("Major", 4.54, 5.24), ("Ofendra's", 5.24, 5.96), ("Guide", 5.96, 6.32),
+            ("to", 6.32, 6.52), ("the", 6.52, 6.64), ("Writer's", 6.64, 7.0),
+            ("Quadrant,", 7.0, 7.5), ("Unauthorized", 7.76, 8.76), ("Edition.", 8.76, 9.12),
+            ("There's", 10.44, 11.16), ("a", 11.16, 11.26),
+            ("misconception", 11.26, 11.86), ("that", 11.86, 12.42),
+            ("it's", 12.42, 12.62), ("kill", 12.62, 13.16), ("or", 13.16, 13.42),
+            ("be", 13.42, 13.72), ("killed", 13.72, 14.16), ("in", 14.16, 14.36),
+            ("the", 14.36, 14.46), ("Writer's", 14.46, 14.82), ("Quadrant.", 14.82, 15.28),
+        ]]
+        result = self.run_alignment(words, [
+            {"id": "s-0", "text": "There’s a misconception that it’s kill or be killed in the Riders Quadrant."},
+            {"id": "s-1", "text": "—Major Afendra’s Guide to the Riders Quadrant (Unauthorized Edition)"},
+        ])
+        attribution = result[1]
+        self.assertEqual(attribution["alignment_method"], "leading_epigraph_attribution")
+        self.assertEqual(attribution["audio_start"], 3.04)
+        self.assertEqual(attribution["audio_end"], 9.12)
+        self.assertEqual(attribution["audio_order"], 5)
+        self.assertTrue(attribution["has_audio_match"])
+        self.assertEqual(result[0]["audio_start"], 10.44)

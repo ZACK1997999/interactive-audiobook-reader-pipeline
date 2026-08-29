@@ -66,6 +66,12 @@ def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, st
 def validate(book_dir: Path, report_path=None):
     errors, warnings, chapters = [], [], []
     review_ledger = _load_review_ledger(book_dir, errors)
+    if review_ledger:
+        errors.append(
+            "reader_review_ledger.json contains alignment exceptions; release is blocked "
+            "because manual exceptions cannot waive algorithmic alignment failures"
+        )
+        review_ledger = {}
     accepted_exceptions = []
     manifest_entries = {}
     manifest_path = book_dir / "reader_run_manifest.json"
@@ -192,20 +198,28 @@ def validate(book_dir: Path, report_path=None):
             non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") == "non_narrated_content"
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
-            start = float(item.get("raw_start", item.get("start", -1)))
-            end = float(item.get("raw_end", item.get("end", -1)))
+            raw_start = item.get("raw_start", item.get("start"))
+            raw_end = item.get("raw_end", item.get("end"))
+            start = float(raw_start) if isinstance(raw_start, (int, float)) else None
+            end = float(raw_end) if isinstance(raw_end, (int, float)) else None
             participates_in_timeline = not owner_accepted and not non_narrated
-            if participates_in_timeline and start < previous_start and not approved_non_monotonic:
+            if participates_in_timeline and start is not None and start < previous_start and not approved_non_monotonic:
                 errors.append(f"{label} {item_id}: non-monotonic raw start")
-            if end < start:
+            if start is not None and end is not None and end < start:
                 errors.append(f"{label} {item_id}: end precedes start")
-            for span in item.get("word_spans", []):
-                span_start = float(span.get("start", -1))
-                span_end = float(span.get("end", -1))
-                if span_start < 0 or span_end < span_start:
+            # Missing-match records are reported once above. Their null spans
+            # are intentional and must not create one duplicate error per word.
+            spans_to_validate = item.get("word_spans", []) if item.get("has_audio_match") else []
+            for span in spans_to_validate:
+                span_start_raw = span.get("start")
+                span_end_raw = span.get("end")
+                span_start = float(span_start_raw) if isinstance(span_start_raw, (int, float)) else None
+                span_end = float(span_end_raw) if isinstance(span_end_raw, (int, float)) else None
+                if span_start is None or span_end is None or span_start < 0 or span_end < span_start:
                     errors.append(f"{label} {item_id}: invalid word span")
             if participates_in_timeline:
-                previous_start = start
+                if start is not None:
+                    previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
             source_tokens = int(item.get("source_token_count", 0))
