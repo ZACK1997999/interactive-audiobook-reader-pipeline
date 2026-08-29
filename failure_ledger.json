@@ -22,8 +22,8 @@
     {
       "id": "ALIGN-001",
       "failure": "Global alignment accepted weak or ambiguous matches as if they were validated.",
-      "prevention": "Weak matches require review and owner-approved exceptions remain in a review ledger.",
-      "regression_tests": ["test_alignment_evidence.py::test_weak_match_requires_review", "test_release_gate.py::test_owner_review_ledger_accepts_explicit_audio_exception"]
+      "prevention": "Weak matches require review; a manual exception ledger cannot waive algorithmic alignment failures.",
+      "regression_tests": ["test_alignment_evidence.py::test_weak_match_requires_review", "test_release_gate.py::test_owner_review_ledger_blocks_release_instead_of_waiving_alignment"]
     },
     {
       "id": "AUDIO-001",

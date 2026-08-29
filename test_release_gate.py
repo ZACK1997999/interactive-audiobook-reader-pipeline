@@ -30,6 +30,12 @@ class ReleaseGateTests(unittest.TestCase):
             self._write_fixture(root)
             self.assertEqual(validate(root), 0)
 
+    def test_provenance_mode_requires_manifests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            self.assertNotEqual(validate(root, require_provenance=True), 0)
+
     def test_review_required_fixture_blocks_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -50,7 +56,22 @@ class ReleaseGateTests(unittest.TestCase):
             report = json.loads((root / "reader_validation_report.json").read_text(encoding="utf-8")) if (root / "reader_validation_report.json").exists() else None
             self.assertIsNone(report)
 
-    def test_owner_review_ledger_accepts_explicit_audio_exception(self):
+    def test_low_lexical_ratio_with_complete_physical_spans_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0]["word_spans"] = [
+                {"word": word, "start": float(index), "end": float(index) + 0.2}
+                for index, word in enumerate(("A", "sentence."))
+            ]
+            data[0]["matched_token_count"] = 2
+            data[0]["match_ratio"] = 0.4
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
+
+    def test_owner_review_ledger_blocks_release_instead_of_waiving_alignment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             self._write_fixture(root)
@@ -69,9 +90,9 @@ class ReleaseGateTests(unittest.TestCase):
                     "evidence": "Reviewed audiobook wording discrepancy.",
                 }],
             }), encoding="utf-8")
-            self.assertEqual(validate(root), 0)
+            self.assertNotEqual(validate(root), 0)
 
-    def test_accepted_unmatched_record_does_not_poison_timeline_order(self):
+    def test_unmatched_record_blocks_release_without_manual_waiver(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "audio").mkdir()
@@ -93,7 +114,7 @@ class ReleaseGateTests(unittest.TestCase):
                 "schema_version": 1,
                 "reviews": [{"chapter": 1, "sentence_id": "s-2", "decision": "accepted", "reviewer": "project_owner", "evidence": "Verified as print-only content between narrated anchors."}],
             }), encoding="utf-8")
-            self.assertEqual(validate(root), 0)
+            self.assertNotEqual(validate(root), 0)
 
     def test_reviewed_out_of_order_alignment_can_release(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,6 +141,29 @@ class ReleaseGateTests(unittest.TestCase):
             aligned[1]["alignment_status"] = "reviewed"
             aligned[1]["review_evidence"] = "Verified against the acoustic word sequence."
             aligned_path.write_text(json.dumps(aligned), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
+
+    def test_structural_heading_and_attribution_audio_order_can_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio").mkdir()
+            (root / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+            sentences = [
+                {"id": "s-0", "text": "A dragon without its rider is a tragedy.", "trans": "失去骑手的龙是一场悲剧。", "vocab": []},
+                {"id": "s-1", "text": "—Article One The Dragon Rider’s Codex", "trans": "《龙骑士法典》第一条", "vocab": []},
+                {"id": "s-2", "text": "CHAPTER ONE", "trans": "第一章", "vocab": []},
+            ]
+            for suffix in ("canonical_sentences", "full_analysis"):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(sentences), encoding="utf-8")
+            acoustic_path = root / "audio" / "book_ch01_acoustic_words.json"
+            spoken = "Chapter one A quote from Article One The Dragon Rider's Codex A dragon without its rider is a tragedy".split()
+            acoustic_path.write_text(json.dumps({"words": [
+                {"word": word, "start": index, "end": index + 0.5}
+                for index, word in enumerate(spoken)
+            ]}), encoding="utf-8")
+            aligned_path = root / "book_ch01_aligned_sentences.json"
+            align_sentences_with_audio(acoustic_path, root / "book_ch01_full_analysis.json", aligned_path)
+
             self.assertEqual(validate(root), 0)
 
     def test_empty_translation_blocks_release(self):

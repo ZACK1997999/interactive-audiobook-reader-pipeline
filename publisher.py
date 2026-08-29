@@ -215,11 +215,16 @@ def validate_release_report(reader_text: str, report_path: Path) -> None:
 def _preflight(config: Dict, context: Dict) -> Dict:
     required = (
         "book_id", "reader_html", "audio_manifest", "intake_plan", "release_report",
-        "portal_repo", "manifest_entry", "public_reader_url",
+        "portal_repo", "manifest_entry", "public_reader_url", "hosting_provider",
+        "cloudflare_project", "deployment_mode",
     )
     missing = [key for key in required if not config.get(key)]
     if missing:
         raise ValueError("missing publisher configuration: " + ", ".join(missing))
+    if config.get("deployment_mode") != "manifest_publisher":
+        raise RuntimeError("legacy deployment paths are not supported by the production publisher")
+    if config.get("hosting_provider") != "cloudflare_pages":
+        raise RuntimeError("hosting_provider must be cloudflare_pages for production publication")
     reader = Path(config["reader_html"]).expanduser().resolve()
     audio_manifest = Path(config["audio_manifest"]).expanduser().resolve()
     repo = Path(config["portal_repo"]).expanduser().resolve()

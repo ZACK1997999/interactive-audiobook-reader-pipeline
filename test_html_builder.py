@@ -43,11 +43,17 @@ class HTMLBuilderTests(unittest.TestCase):
             )
             rendered = output.read_text(encoding="utf-8")
             self.assertIn('id="bookmarksToggleBtn"', rendered)
+            self.assertNotIn('inspect-actions', rendered)
+            self.assertIn('id="bookmarkList"', rendered)
             for function_name in (
-                "bookmarkSelection", "toggleSentenceBookmark", "updateBookmarksUI",
+                "bookmarkSelection", "updateBookmarksUI",
                 "refreshBookmarkButton", "jumpToBookmark", "toggleBookmarks",
             ):
                 self.assertRegex(rendered, rf"function {function_name}\s*\(")
+            self.assertIn("chapter === targetChapter", rendered)
+            self.assertIn("text === targetText", rendered)
+            self.assertIn("window.addEventListener('storage'", rendered)
+            self.assertIn("--bg-page: #12151c", rendered)
 
             scripts = re.findall(r"<script(?:[^>]*)>(.*?)</script>", rendered, re.DOTALL)
             self.assertGreaterEqual(len(scripts), 2)
@@ -279,3 +285,46 @@ class HTMLBuilderTests(unittest.TestCase):
             self.assertIn("isDoubleTap", rendered)
             for state in ("'idle'", "'playing'", "'pause_buffer'", "'replaying'"):
                 self.assertIn(state, rendered)
+
+    def test_chapter_title_deduplication_and_intext_styling(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            output = tmp_path / "reader.html"
+            (tmp_path / "audio").mkdir(exist_ok=True)
+            (tmp_path / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+            canonical = [
+                {"id": "s-1", "text": "—The Dragon Codex Citation"},
+                {"id": "s-2", "text": "CHAPTER ONE"},
+                {"id": "s-3", "text": "First story sentence."},
+            ]
+            analysis = [{**item, "trans": "译文", "vocab": []} for item in canonical]
+            aligned = [
+                {**analysis[0], "word_spans": [], "raw_start": None, "raw_end": None, "has_audio_match": False, "alignment_status": "not-applicable", "alignment_reason": "non_narrated_content", "fallback_used": False, "matched_token_count": 0, "source_token_count": 4, "match_ratio": 0},
+                {**analysis[1], "word_spans": [], "raw_start": None, "raw_end": None, "has_audio_match": False, "alignment_status": "not-applicable", "alignment_reason": "non_narrated_content", "fallback_used": False, "matched_token_count": 0, "source_token_count": 2, "match_ratio": 0},
+                {**analysis[2], "word_spans": [{"word": "First", "start": 0, "end": 1}], "raw_start": 0, "raw_end": 1, "has_audio_match": True, "alignment_status": "validated", "fallback_used": False, "matched_token_count": 3, "source_token_count": 3, "match_ratio": 1},
+            ]
+            for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+                (tmp_path / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            report_path = tmp_path / "reader_validation_report.json"
+            _, token = validate_for_release(tmp_path, report_path)
+
+            build_master_reader(
+                book_title="Fourth Wing",
+                book_subtitle="Bilingual Reader",
+                book_author="Rebecca Yarros",
+                chapters_config=[{
+                    "num": 1,
+                    "title": "Chapter 1",
+                    "audio": "./audio/chapter_01.mp3",
+                    "aligned_json": str(tmp_path / "book_ch01_aligned_sentences.json"),
+                }],
+                output_html_path=str(output),
+                release_token=token,
+                release_report_path=report_path,
+                book_id="fourth-wing",
+            )
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn('<h1 class="book-title">CHAPTER 1</h1>', rendered)
+            self.assertNotIn('CHAPTER 1<br>Chapter 1', rendered)
+            self.assertIn('class="sentence-text epigraph-citation"', rendered)
+            self.assertIn('class="sentence-text chapter-intext-heading"', rendered)

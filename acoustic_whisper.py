@@ -3,26 +3,47 @@ Module: acoustic_whisper.py
 Description: Apple Silicon GPU-Accelerated MLX Whisper Word Timestamp Extractor.
 """
 
+import hashlib
 import json
+import math
 import time
 import sys
+from pathlib import Path
 from artifact_io import atomic_write_json
 
-def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-community/whisper-large-v3-turbo"):
-    import mlx_whisper
+ACOUSTIC_PROFILE_VERSION = 2
+ACOUSTIC_TRANSCRIPTION_OPTIONS = {
+    "condition_on_previous_text": False,
+    "hallucination_silence_threshold": 2.0,
+    "language": "en",
+}
+
+
+def run_mlx_acoustic_extraction(
+    audio_path,
+    output_json_path,
+    model_name="mlx-community/whisper-large-v3-turbo",
+    *,
+    transcribe_fn=None,
+):
+    if transcribe_fn is None:
+        import mlx_whisper
+        transcribe_fn = mlx_whisper.transcribe
     
     print(f"Starting MLX Whisper acoustic extraction on {audio_path} using {model_name}...")
     start_t = time.time()
     
-    result = mlx_whisper.transcribe(
+    result = transcribe_fn(
         audio_path,
         path_or_hf_repo=model_name,
         word_timestamps=True,
-        verbose=False
+        verbose=False,
+        **ACOUSTIC_TRANSCRIPTION_OPTIONS,
     )
     
     words_list = []
     segments_list = []
+    dropped_zero_duration_words = 0
     
     for seg in result.get("segments", []):
         segments_list.append({
@@ -32,6 +53,18 @@ def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-co
             "text": seg.get("text")
         })
         for w in seg.get("words", []):
+            if not isinstance(w.get("word"), str) or not w.get("word").strip():
+                raise ValueError("acoustic backend returned a word without text")
+            if not isinstance(w.get("start"), (int, float)) or not isinstance(w.get("end"), (int, float)):
+                raise ValueError("acoustic backend returned a word without timestamps")
+            if not math.isfinite(float(w["start"])) or not math.isfinite(float(w["end"])) or float(w["end"]) < float(w["start"]):
+                raise ValueError("acoustic backend returned an invalid word timestamp")
+            if float(w["end"]) == float(w["start"]):
+                # MLX can emit zero-duration boundary tokens. They cannot be
+                # used for alignment, so discard and expose the count rather
+                # than corrupting the artifact or aborting the whole chapter.
+                dropped_zero_duration_words += 1
+                continue
             words_list.append({
                 "word": w.get("word"),
                 "start": round(w.get("start", 0.0), 2),
@@ -40,8 +73,13 @@ def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-co
             })
             
     output_data = {
+        "schema_version": 2,
+        "acoustic_profile_version": ACOUSTIC_PROFILE_VERSION,
         "model": model_name,
+        "source_audio_sha256": hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if Path(audio_path).is_file() else None,
+        "transcription_options": ACOUSTIC_TRANSCRIPTION_OPTIONS,
         "word_timestamps": True,
+        "dropped_zero_duration_words": dropped_zero_duration_words,
         "segments": segments_list,
         "words": words_list
     }

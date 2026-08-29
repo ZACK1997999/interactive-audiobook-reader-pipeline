@@ -8,11 +8,14 @@ import html
 import os
 import re
 import sys
+import hashlib
+from pathlib import Path
 from artifact_io import atomic_write_text
 from release_token import ReleaseToken, verify_release_token
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path,
-                        *, release_token: ReleaseToken, release_report_path, book_id=None):
+                        *, release_token: ReleaseToken = None, release_report_path, book_id=None,
+                        preview=False):
     """
     chapters_config: list of dicts with:
       - 'num': unique internal track number (e.g. 0, 1, 2)
@@ -31,7 +34,11 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 
     output_html_path = os.path.abspath(output_html_path)
     book_dir = os.path.dirname(output_html_path)
-    verify_release_token(release_token, book_dir, release_report_path)
+    if preview:
+        if release_token is not None:
+            raise ValueError("Preview compilation must not receive a release token")
+    else:
+        verify_release_token(release_token, book_dir, release_report_path)
     with open(release_report_path, encoding="utf-8") as report_file:
         report = json.load(report_file)
     authorized = {
@@ -41,6 +48,8 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
     requested = {os.path.abspath(c["aligned_json"]) for c in chapters_config}
     if requested != authorized:
         raise RuntimeError("HTML compilation chapter set does not match the validated release report")
+
+    report_sha256 = hashlib.sha256(Path(release_report_path).read_bytes()).hexdigest()
 
     loaded_chapters = []
     for c in chapters_config:
@@ -78,12 +87,13 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="reader-release-report-sha256" content="{html.escape(release_token.report_sha256)}">
-<title>{html.escape(book_title)}: {html.escape(book_subtitle)}</title>
+<meta name="reader-release-report-sha256" content="{html.escape(report_sha256)}">
+<meta name="reader-build-kind" content="{'experimental-preview' if preview else 'release'}">
+<title>{html.escape(('EXPERIMENTAL PREVIEW — ' if preview else '') + book_title)}: {html.escape(book_subtitle)}</title>
 <script>
 (function() {{
   var bId = {json.dumps(book_id)};
-  var t = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem('reader_' + bId + '_theme') || localStorage.getItem(bId + '_theme');
+  var t = localStorage.getItem('audible_theme') || localStorage.getItem('audible_reader_theme') || localStorage.getItem('reader_' + bId + '_theme') || localStorage.getItem(bId + '_theme');
   if (t && (t === 'sepia' || t === 'light' || t === 'dark')) {{
     document.documentElement.setAttribute('data-theme', t);
   }}
@@ -430,6 +440,8 @@ body {{
     grid-template-columns: 1fr;
     gap: 12px;
   }}
+}}
+
 .selection-bookmark {{
   display: none;
   position: fixed;
@@ -616,41 +628,6 @@ body {{
   color: var(--accent);
 }}
 
-.inspect-actions {{
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border);
-}}
-
-.inspect-btn-bookmark {{
-  background: var(--bg-page);
-  border: 1px solid var(--border);
-  color: var(--accent);
-  font-family: var(--font-sans);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-}}
-
-.inspect-btn-bookmark:hover {{
-  background: var(--bg-hover);
-  border-color: var(--accent-light);
-}}
-
-.inspect-btn-bookmark.bookmarked {{
-  background: var(--accent);
-  color: #ffffff;
-  border-color: var(--accent);
-}}
-
 .v-pos {{
   font-size: 0.72rem;
   color: var(--text-sub);
@@ -669,6 +646,27 @@ body {{
   color: var(--accent);
   border-bottom: 1px solid var(--border);
   padding-bottom: 6px;
+}}
+
+.chapter-intext-heading {{
+  font-family: var(--font-sans);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-align: center;
+  margin: 24px 0 16px;
+  padding: 8px 12px;
+}}
+
+.epigraph-citation {{
+  font-style: italic;
+  color: var(--text-sub);
+  font-size: 0.95rem;
+  margin-bottom: 20px;
+  padding-left: 16px;
+  border-left: 2px solid var(--accent-light);
 }}
 
 /* Mobile Specific Refinements */
@@ -790,13 +788,17 @@ body {{
         csents = ch["sentences"]
         active_cls = " active" if cnum == first_ch_num else ""
         ch_heading_label = ch["label"].upper()
+        if ctitle.strip().upper() == ch_heading_label.strip().upper() or ctitle.strip().upper() == f"CHAPTER {cnum}":
+            title_html = ch_heading_label
+        else:
+            title_html = f"{ch_heading_label}<br>{html.escape(ctitle)}"
         
         html_head += f"""
   <!-- CHAPTER {cnum} -->
   <section class="chapter-section{active_cls}" id="chapter-{cnum}" data-audio="{html.escape(caudio)}" data-public-audio="{html.escape(cpublic_audio)}" data-ch="{cnum}">
     <header class="book-header">
       <div class="book-subtitle">{html.escape(book_subtitle)}</div>
-      <h1 class="book-title">{ch_heading_label}<br>{html.escape(ctitle)}</h1>
+      <h1 class="book-title">{title_html}</h1>
       <div class="book-author">{html.escape(book_author)}</div>
     </header>
 
@@ -806,9 +808,11 @@ body {{
             raw_sid = s["id"]
             sid = f"c{cnum}-{raw_sid}"
             is_h = s.get("is_heading", False)
-            start = s.get("start", 0.0)
-            end = s.get("end", 0.0)
-            has_match = 1 if s.get("has_audio_match", True) and (end > start) else 0
+            start = s.get("audio_start", s.get("start"))
+            end = s.get("audio_end", s.get("end"))
+            has_match = 1 if s.get("has_audio_match", True) and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else 0
+            start_arg = "null" if start is None else str(start)
+            end_arg = "null" if end is None else str(end)
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
             raw_text = s.get("text", "")
@@ -823,7 +827,7 @@ body {{
                     word_html_list.append(f'<span class="w" data-s="{ws}" data-e="{we}">{rw}</span>')
             else:
                 for rw in s["text"].split():
-                    word_html_list.append(f'<span class="w" data-s="{start}" data-e="{end}">{html.escape(rw)}</span>')
+                    word_html_list.append(f'<span class="w" data-s="{start_arg}" data-e="{end_arg}">{html.escape(rw)}</span>')
             
             sentence_text_html = " ".join(word_html_list)
             
@@ -838,10 +842,16 @@ body {{
             if vocab_html_list:
                 vocab_section = f'<div class="inspect-vocab-list">{"".join(vocab_html_list)}</div>'
                 
-            h_class = " chapter-heading-1" if is_h else ""
+            h_class = ""
+            if is_h:
+                h_class += " chapter-heading-1"
+            elif re.match(r"^CHAPTER\s+(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTEEN|FOURTEEN|FIFTEEN|SIXTEEN|SEVENTEEN|EIGHTEEN|NINETEEN|TWENTY|[A-Z\-]+|\d+)\s*$", raw_text.strip(), re.IGNORECASE):
+                h_class += " chapter-intext-heading"
+            elif raw_text.strip().startswith(("—", "–", "--", "- ")):
+                h_class += " epigraph-citation"
             html_head += f"""
-      <div class="sentence-unit" id="{sid}" data-start="{start}" data-end="{end}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
-        <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start}, {end}, {has_match})">
+      <div class="sentence-unit" id="{sid}" data-start="{start_arg}" data-end="{end_arg}" data-audio-order="{s.get('audio_order', '')}" data-epigraph="{1 if s.get('alignment_method') == 'leading_epigraph_attribution' else 0}" data-matched="{has_match}" data-text="{html.escape(raw_text)}" data-trans="{trans}" data-vocab="{html.escape(json.dumps(vocab, ensure_ascii=False))}">
+        <div class="sentence-text{h_class}" onclick="handleSentenceClick(event, '{sid}', {start_arg}, {end_arg}, {has_match})">
           <span class="s-content">{sentence_text_html}</span>
         </div>
         <div class="inspect-panel" onclick="handleInspectPanelClick(event, '{sid}')" title="Click to collapse / 点击折叠">
@@ -1009,7 +1019,7 @@ function rebuildSentenceTimeIndex() {
     start: parseFloat(el.dataset.start || '0'),
     end: parseFloat(el.dataset.end || '0'),
     el: el
-  })).filter(item => item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
+  })).filter(item => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start && item.el.dataset.matched !== '0').sort((a, b) => a.start - b.start) : [];
 }
 
 function findSentenceAt(time) {
@@ -1106,10 +1116,18 @@ function setTheme(theme) {
 window.toggleTheme = toggleTheme;
 window.setTheme = setTheme;
 
-const savedTheme = localStorage.getItem('audible_reader_theme') || localStorage.getItem('audible_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || 'sepia';
+const savedTheme = localStorage.getItem('audible_theme') || localStorage.getItem('audible_reader_theme') || localStorage.getItem(STORAGE_PREFIX + 'theme') || 'sepia';
 if (savedTheme && themes.includes(savedTheme)) {
   setTheme(savedTheme);
 }
+window.addEventListener('storage', event => {{
+  if (event.key !== 'audible_theme' && event.key !== 'audible_reader_theme') return;
+  if (themes.includes(event.newValue) && event.newValue !== document.documentElement.getAttribute('data-theme')) {{
+    document.documentElement.setAttribute('data-theme', event.newValue);
+    const themePreset = document.getElementById('themePreset');
+    if (themePreset) themePreset.value = event.newValue;
+  }}
+}});
 
 let currentFontSizeRem = 1.20;
 
@@ -1172,37 +1190,6 @@ function startSentenceShadowing(sentenceEl) {
   sentenceEl.classList.add('active');
 }
 
-function ensureInspectBookmarkButton(sentenceEl) {{
-  if (!sentenceEl) return;
-  const panel = sentenceEl.querySelector('.inspect-panel');
-  if (!panel) return;
-  let actions = panel.querySelector('.inspect-actions');
-  const allBookmarks = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
-  const isBookmarked = allBookmarks.some(b => (typeof b === 'string' ? b === sentenceEl.id : b.id === sentenceEl.id));
-
-  if (!actions) {{
-    actions = document.createElement('div');
-    actions.className = 'inspect-actions';
-    actions.onclick = (e) => e.stopPropagation();
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'inspect-btn-bookmark' + (isBookmarked ? ' bookmarked' : '');
-    btn.innerHTML = isBookmarked ? '★ Bookmarked' : '☆ Bookmark sentence';
-    btn.onclick = (e) => {{
-      e.stopPropagation();
-      toggleSentenceBookmark(sentenceEl.id);
-    }};
-    actions.appendChild(btn);
-    panel.appendChild(actions);
-  }} else {{
-    const btn = actions.querySelector('.inspect-btn-bookmark');
-    if (btn) {{
-      btn.className = 'inspect-btn-bookmark' + (isBookmarked ? ' bookmarked' : '');
-      btn.innerHTML = isBookmarked ? '★ Bookmarked' : '☆ Bookmark sentence';
-    }}
-  }}
-}}
-
 function updateBookmarksUI() {{
   const list = document.getElementById('bookmarkList');
   if (!list) return;
@@ -1242,10 +1229,13 @@ function removeBookmark(target) {{
   const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
   const targetId = typeof target === 'string' ? target : target.id;
   const targetText = typeof target === 'string' ? null : target.text;
+  const targetChapter = typeof target === 'string' ? null : target.chapter;
   const remaining = bookmarks.filter(bookmark => {{
     const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
     const text = typeof bookmark === 'string' ? null : bookmark.text;
-    return !(id === targetId && (targetText === null || text === targetText));
+    const chapter = typeof bookmark === 'string' ? null : bookmark.chapter;
+    return !(id === targetId && (targetText === null || text === targetText) &&
+      (targetChapter === null || chapter === targetChapter));
   }});
   localStorage.setItem(key, JSON.stringify(remaining));
   updateBookmarksUI();
@@ -1277,31 +1267,6 @@ function jumpToBookmark(id, targetChapter) {{
   }}, 100);
 }}
 
-function toggleSentenceBookmark(id) {{
-  const sentence = document.getElementById(id);
-  if (!sentence) return;
-  const text = sentence.dataset.text || sentence.querySelector('.s-content')?.textContent?.trim() || sentence.id;
-  const key = STORAGE_PREFIX + 'bookmarks';
-  const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
-  const existingIdx = bookmarks.findIndex(b => (typeof b === 'string' ? b === id : b.id === id));
-  if (existingIdx >= 0) {{
-    bookmarks.splice(existingIdx, 1);
-  }} else {{
-    bookmarks.push({{
-      id: sentence.id,
-      text: text,
-      chapter: activeChapterNum,
-      savedAt: new Date().toISOString()
-    }});
-  }}
-  localStorage.setItem(key, JSON.stringify(bookmarks));
-  ensureInspectBookmarkButton(sentence);
-  if (typeof refreshBookmarkButton === 'function') refreshBookmarkButton();
-  if (document.getElementById('bookmarkList')?.classList.contains('open')) {{
-    if (typeof updateBookmarksUI === 'function') updateBookmarksUI();
-  }}
-}}
-
 function handleSentenceClick(event, id, start, end, hasMatch) {{
   if (event) event.stopPropagation();
   const el = document.getElementById(id);
@@ -1318,13 +1283,12 @@ function handleSentenceClick(event, id, start, end, hasMatch) {{
   }}
   
   localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
-  if (start > 0 || hasMatch) {{
+  if (hasMatch && Number.isFinite(start) && Number.isFinite(end) && end > start) {{
     audio.currentTime = start;
     audio.play();
     globalPlayBtn.textContent = '⏸ Pause';
   }}
   el.classList.add('active');
-  ensureInspectBookmarkButton(el);
 }}
 
 function handleInspectPanelClick(event, id) {

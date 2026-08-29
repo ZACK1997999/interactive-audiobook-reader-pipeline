@@ -32,6 +32,8 @@ setup(
         "mlx_acoustic_worker",
         "intake_reconciler",
         "publisher",
+        "deployment_preflight",
+        "release_cli",
     ],
     python_requires=">=3.9",
     install_requires=[],
@@ -47,6 +49,7 @@ setup(
             "reader-quality-check=quality_gate:main",
             "reader-intake=intake_reconciler:main",
             "reader-publish=publisher:main",
+            "reader-release=release_cli:main",
         ]
     },
 )
