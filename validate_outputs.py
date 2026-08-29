@@ -65,6 +65,15 @@ def _validate_provenance(book_dir: Path, errors: list[str]):
 
 def _suspicious_sentence_boundaries(text: str) -> list[str]:
     """Return boundary matches after excluding whitelisted prose abbreviations."""
+    # Dialogue records may contain an internal sentence boundary (or a closing
+    # quote followed by its attribution) while remaining one playable unit.
+    # These are intentional editorial structures, not evidence of a bad split.
+    if text.lstrip().startswith(("\u201c", '"')) and (
+        text.count("\u201c") > text.count("\u201d")
+        or text.count('"') % 2 == 1
+        or re.match(r'^\s*[\u201c"](?:[^\n]*[.!?][\u201d"]\s+[A-Z][a-z]+)', text)
+    ):
+        return []
     return [
         match.group(0)
         for match in MULTI_BOUNDARY.finditer(text)

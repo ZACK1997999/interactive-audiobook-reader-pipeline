@@ -47,6 +47,7 @@ ASR_TOKEN_VARIANTS = {
     "orly": "aurelie", "glean": "gleann", "shows": "chose", "heeh oo": "he who",
     "hmph": "hmm", "clyde": "claidh", "athbeen": "athebyne",
     "basgayeth": "basgiath", "orisha": "aretia",
+    "rhiannon": "rian", "matthias": "mateus",
 }
 
 # Whole-word audio renderings that cannot be handled safely by a per-word
