@@ -24,7 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 PIPELINE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PIPELINE_DIR))
 
-from acoustic_whisper import run_mlx_acoustic_extraction
+from acoustic_whisper import ACOUSTIC_PROFILE_VERSION, run_mlx_acoustic_extraction
+from acoustic_repair import repair_acoustic_gaps
 from agy_linguistic_worker import process_canonical_sentences, PROMPT_PATH
 from dynamic_aligner import align_sentences_with_audio
 from validate_outputs import validate_for_release
@@ -40,12 +41,16 @@ AUDIO_DIR = BOOK_DIR / 'audio'
 TOTAL_CHAPTERS = 39
 
 
-def _is_acoustic_ready(path: Path) -> bool:
+def _is_acoustic_ready(path: Path, *, require_current_profile: bool = False) -> bool:
     if not path.is_file() or path.stat().st_size < 1000:
         return False
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
-        return (isinstance(data, dict) and bool(data.get('words'))) or (isinstance(data, list) and bool(data))
+        if isinstance(data, dict):
+            if require_current_profile and data.get('acoustic_profile_version') != ACOUSTIC_PROFILE_VERSION:
+                return False
+            return bool(data.get('words'))
+        return bool(data) and not require_current_profile
     except Exception:
         return False
 
@@ -155,6 +160,27 @@ def run_alignment_check(ch: int) -> bool:
     return True
 
 
+def run_bounded_acoustic_repairs():
+    print('=== [Repairing Bounded Acoustic Failure Windows] ===', flush=True)
+    results = []
+    for ch in range(1, TOTAL_CHAPTERS + 1):
+        prefix = f'fourth_wing_ch{ch:02d}'
+        result = repair_acoustic_gaps(
+            AUDIO_DIR / f'chapter_{ch:02d}.mp3',
+            AUDIO_DIR / f'{prefix}_acoustic_words.json',
+            BOOK_DIR / f'{prefix}_full_analysis.json',
+            BOOK_DIR / f'{prefix}_aligned_sentences.json',
+        )
+        results.append({"chapter": ch, **result})
+        print(
+            f"[Acoustic Repair] Chapter {ch:02d}: {result['status']} "
+            f"({result.get('review_before', 0)} -> {result.get('review_after', result.get('review_before', 0))})",
+            flush=True,
+        )
+    atomic_write_json(BOOK_DIR / 'acoustic_repair_report.json', results)
+    return results
+
+
 def run_pipeline():
     print('================================================================================', flush=True)
     print('      Starting Industrial End-to-End Pipeline for Fourth Wing (39 Chapters)     ', flush=True)
@@ -188,6 +214,8 @@ def run_pipeline():
     if not all_aligned:
         print('[ERROR] Not all chapters were aligned successfully. Halting release.', file=sys.stderr, flush=True)
         return 1
+
+    run_bounded_acoustic_repairs()
 
     # Quality Gate Validation & Compilation
     print("\n=== [Running Release Quality Gate] ===", flush=True)

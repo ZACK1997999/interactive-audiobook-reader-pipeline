@@ -197,6 +197,15 @@ def validate(book_dir: Path, report_path=None):
                 and float(item.get("match_ratio", 0.0)) >= 0.5
             )
             non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") in {"non_narrated_content", "non_narrated_text"}
+            structural_audio_reorder = (
+                item.get("alignment_status") == "validated"
+                and item.get("alignment_method") in {
+                    "leading_epigraph_attribution",
+                    "chapter_heading_numeric_variant",
+                }
+                and item.get("has_audio_match") is True
+                and not item.get("fallback_used")
+            )
             if non_narrated:
                 evidence = item.get("non_narrated_evidence") or {}
                 acoustic_path = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
@@ -215,7 +224,10 @@ def validate(book_dir: Path, report_path=None):
             raw_end = item.get("raw_end", item.get("end"))
             start = float(raw_start) if isinstance(raw_start, (int, float)) else None
             end = float(raw_end) if isinstance(raw_end, (int, float)) else None
-            participates_in_timeline = not owner_accepted and not non_narrated
+            # Opening headings and attributions can be printed after the quote
+            # while narrated before it. They retain real audio timestamps but
+            # must not distort the monotonic body-sentence timeline.
+            participates_in_timeline = not owner_accepted and not non_narrated and not structural_audio_reorder
             if participates_in_timeline and start is not None and start < previous_start and not approved_non_monotonic:
                 errors.append(f"{label} {item_id}: non-monotonic raw start")
             if start is not None and end is not None and end < start:

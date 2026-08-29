@@ -1,0 +1,60 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from acoustic_whisper import (
+    ACOUSTIC_PROFILE_VERSION,
+    ACOUSTIC_TRANSCRIPTION_OPTIONS,
+    run_mlx_acoustic_extraction,
+)
+from fourth_wing_industrial_runner import _is_acoustic_ready
+
+
+class AcousticWhisperTests(unittest.TestCase):
+    def test_extraction_disables_cross_window_prompt_and_records_profile(self):
+        observed = {}
+
+        def fake_transcribe(audio_path, **kwargs):
+            observed.update(kwargs)
+            return {
+                "segments": [{
+                    "id": 1,
+                    "start": 1.0,
+                    "end": 2.0,
+                    "text": " Complete sentence.",
+                    "words": [{"word": " Complete", "start": 1.0, "end": 1.5, "probability": 0.9}],
+                }]
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "acoustic.json"
+            result = run_mlx_acoustic_extraction("chapter.mp3", output, transcribe_fn=fake_transcribe)
+            written = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(observed["condition_on_previous_text"], False)
+        self.assertEqual(observed["hallucination_silence_threshold"], 2.0)
+        self.assertEqual(observed["language"], "en")
+        self.assertEqual(result["acoustic_profile_version"], ACOUSTIC_PROFILE_VERSION)
+        self.assertEqual(written["transcription_options"], ACOUSTIC_TRANSCRIPTION_OPTIONS)
+
+    def test_runner_rejects_legacy_acoustic_artifact_for_regeneration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = root / "legacy.json"
+            current = root / "current.json"
+            padding = "x" * 1200
+            legacy.write_text(json.dumps({"padding": padding, "words": [{"word": "old"}]}), encoding="utf-8")
+            current.write_text(json.dumps({
+                "acoustic_profile_version": ACOUSTIC_PROFILE_VERSION,
+                "padding": padding,
+                "words": [{"word": "current"}],
+            }), encoding="utf-8")
+
+            self.assertTrue(_is_acoustic_ready(legacy))
+            self.assertFalse(_is_acoustic_ready(legacy, require_current_profile=True))
+            self.assertTrue(_is_acoustic_ready(current, require_current_profile=True))
+
+
+if __name__ == "__main__":
+    unittest.main()

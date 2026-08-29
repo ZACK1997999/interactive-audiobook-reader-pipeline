@@ -8,17 +8,34 @@ import time
 import sys
 from artifact_io import atomic_write_json
 
-def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-community/whisper-large-v3-turbo"):
-    import mlx_whisper
+ACOUSTIC_PROFILE_VERSION = 2
+ACOUSTIC_TRANSCRIPTION_OPTIONS = {
+    "condition_on_previous_text": False,
+    "hallucination_silence_threshold": 2.0,
+    "language": "en",
+}
+
+
+def run_mlx_acoustic_extraction(
+    audio_path,
+    output_json_path,
+    model_name="mlx-community/whisper-large-v3-turbo",
+    *,
+    transcribe_fn=None,
+):
+    if transcribe_fn is None:
+        import mlx_whisper
+        transcribe_fn = mlx_whisper.transcribe
     
     print(f"Starting MLX Whisper acoustic extraction on {audio_path} using {model_name}...")
     start_t = time.time()
     
-    result = mlx_whisper.transcribe(
+    result = transcribe_fn(
         audio_path,
         path_or_hf_repo=model_name,
         word_timestamps=True,
-        verbose=False
+        verbose=False,
+        **ACOUSTIC_TRANSCRIPTION_OPTIONS,
     )
     
     words_list = []
@@ -40,7 +57,10 @@ def run_mlx_acoustic_extraction(audio_path, output_json_path, model_name="mlx-co
             })
             
     output_data = {
+        "schema_version": 2,
+        "acoustic_profile_version": ACOUSTIC_PROFILE_VERSION,
         "model": model_name,
+        "transcription_options": ACOUSTIC_TRANSCRIPTION_OPTIONS,
         "word_timestamps": True,
         "segments": segments_list,
         "words": words_list

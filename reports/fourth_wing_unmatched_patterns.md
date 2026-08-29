@@ -9,19 +9,22 @@ unresolved records remain release-blocking.
 | Leading audiobook attribution / epigraph | 38 resolved | Opening acoustic window contains `A quote from`, `An excerpt from`, or `From`; fuzzy citation binding has real word timestamps | Algorithmically validated |
 | Typographic ellipsis / pause marker | 33 | Source token is only `…`/`...`; it has no lexical token that can be truthfully played or highlighted | `non_narrated_text`, with per-record evidence |
 | Printed chapter heading / spoken numeric variant | 38 resolved | Acoustic opening contains spoken `Chapter N`, while printed text uses a different number spelling/format | Algorithmically validated |
-| Short dialogue or proper name | 55 | Short text is ambiguous or has repeated/weak acoustic candidates; 99 exact occurrences across this class | Must fix or prove with bounded acoustic mapping |
-| Body text with no sufficient global match | 57 | No exact occurrence; 10 have fuzzy similarity ≥ 0.70, 22 are below 0.50 | Must fix or prove omission from the source/audio pair |
-| Printed attribution candidate | 2 | Dash-prefixed citation remains unmatched after the leading-attribution pass | Must inspect individually |
+| Bounded acoustic recovery | 43 resolved across accepted windows | Fresh short-window ASR with cross-window prompting disabled reduced long-form sparse-ASR failures; Chapter 9 reduced 10→0 and Chapter 12 13→1 | Accepted only when review set strictly decreased |
+| Short dialogue or proper name | 16 direct unresolved records; more low-quality records remain gate-visible | Repeated names, interjections, and very short phrases still have ambiguous candidates | Must fix or prove with bounded acoustic mapping |
+| Body text / ASR variant | 11 direct unresolved records; several now recovered by local retranscription | Remaining records need a unique local match or explicit evidence | Must fix or prove; never use a timestamp fallback |
+| Structural or order conflict | 1 direct out-of-order record plus gate-visible structural records | Chapter-opening metadata and ambiguous boundaries require separate handling | Must inspect individually |
 
 ## Current gate state
 
 - Leading attribution records resolved: 38.
 - Spoken numeric chapter headings resolved: 38.
 - Confirmed typographic `non_narrated_text` records: 33.
-- Remaining algorithmic review records: 129 (59 `no_sufficient_global_match`, 56 `ambiguous_short_sentence`, plus 14 records requiring individual inspection after the structural passes).
+- Remaining gate-visible review records: 39; 27 records still lack usable word spans, one has a structural order conflict, and one legacy review ledger still blocks release.
+- Accepted bounded acoustic recovery is recorded in `acoustic_repair_report.json` in the Fourth Wing source directory.
 - Full report: `reader_validation_report.json` in the Fourth Wing source directory.
 - `release_ready`: `false`.
 
 The 33 ellipsis records are the only records automatically classified as
 non-narrated in this run. Chapter headings are mapped to their spoken numeric
-variants. No body sentence or short dialogue is being batch-approved.
+variants. No body sentence or short dialogue is being batch-approved without a
+fresh acoustic match and a measurable gate improvement.

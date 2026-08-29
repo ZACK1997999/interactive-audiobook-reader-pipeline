@@ -122,6 +122,29 @@ class ReleaseGateTests(unittest.TestCase):
             aligned_path.write_text(json.dumps(aligned), encoding="utf-8")
             self.assertEqual(validate(root), 0)
 
+    def test_structural_heading_and_attribution_audio_order_can_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio").mkdir()
+            (root / "audio" / "chapter_01.mp3").write_bytes(b"fixture")
+            sentences = [
+                {"id": "s-0", "text": "A dragon without its rider is a tragedy.", "trans": "失去骑手的龙是一场悲剧。", "vocab": []},
+                {"id": "s-1", "text": "—Article One The Dragon Rider’s Codex", "trans": "《龙骑士法典》第一条", "vocab": []},
+                {"id": "s-2", "text": "CHAPTER ONE", "trans": "第一章", "vocab": []},
+            ]
+            for suffix in ("canonical_sentences", "full_analysis"):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(sentences), encoding="utf-8")
+            acoustic_path = root / "audio" / "book_ch01_acoustic_words.json"
+            spoken = "Chapter one A quote from Article One The Dragon Rider's Codex A dragon without its rider is a tragedy".split()
+            acoustic_path.write_text(json.dumps({"words": [
+                {"word": word, "start": index, "end": index + 0.5}
+                for index, word in enumerate(spoken)
+            ]}), encoding="utf-8")
+            aligned_path = root / "book_ch01_aligned_sentences.json"
+            align_sentences_with_audio(acoustic_path, root / "book_ch01_full_analysis.json", aligned_path)
+
+            self.assertEqual(validate(root), 0)
+
     def test_empty_translation_blocks_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

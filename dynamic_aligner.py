@@ -21,8 +21,50 @@ COMMON_CONTRACTIONS = {
     "won't": "will not", "wouldn't": "would not", "you're": "you are",
 }
 
+# Deterministic ASR variants observed in the supplied Fourth Wing acoustic
+# artifacts. These are deliberately narrow and are applied symmetrically to
+# source and acoustic text; they are not a fuzzy or global nearest-word rule.
+ASR_PHRASE_VARIANTS = (
+    ("soaring gale", "sorrengail"),
+    ("soren gale", "sorrengail"),
+    ("seagale", "sgaeyl"),
+    ("andarna urim", "andarnaurram"),
+    ("michael ivarum", "michel iverem"),
+    ("cameron dyer", "kamryn dyre"),
+    ("dane atos", "dain aetos"),
+    ("zayden ryerson", "xaden riorson"),
+    ("wing leader", "wingleader"),
+    ("hermotherwasssss", "her mother was"),
+    ("leavingtheriders", "leaving the riders"),
+    ("canthrowmeback", "can throw me back"),
+    ("tell deigh", "tell deigh"),
+)
+
+ASR_TOKEN_VARIANTS = {
+    "zayden": "xaden", "satan": "xaden", "ryerson": "riorson",
+    "dane": "dain", "atos": "aetos", "tern": "tairn", "coda": "codagh",
+    "rii": "rhi", "fierg": "feirge", "sleeg": "sliseag", "riddick": "ridoc",
+    "orly": "aurelie", "glean": "gleann", "shows": "chose", "heeh oo": "he who",
+    "hmph": "hmm", "clyde": "claidh", "athbeen": "athebyne",
+}
+
+NUMBER_PHRASE_VARIANTS = (
+    ("sixty-eight", "68"),
+    ("four-hundred", "400"),
+    ("sixty eight", "68"),
+    ("hundred and eighty", "180"),
+    ("hundred and seventy-one", "171"),
+    ("hundred and seventy one", "171"),
+    ("hundred and seven", "107"),
+    ("a hundred and seven", "107"),
+    ("four hundred", "400"),
+    ("four fifteen", "4 15"),
+)
+
 def tokenize_clean(text):
     normalized = str(text).lower().replace("’", "'").replace("…", " ")
+    for phrase, canonical in ASR_PHRASE_VARIANTS + NUMBER_PHRASE_VARIANTS:
+        normalized = re.sub(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", canonical, normalized)
     # Conservative source/transcript variants observed in this audiobook.
     normalized = re.sub(r"\banytime\b", "any time", normalized)
     normalized = re.sub(r"\b(?:signora|señora)\b", "senora", normalized)
@@ -30,7 +72,7 @@ def tokenize_clean(text):
     for contraction, expansion in COMMON_CONTRACTIONS.items():
         normalized = re.sub(rf"(?<![a-z]){re.escape(contraction.strip())}(?![a-z])", expansion, normalized)
     cleaned = re.sub(r'[^a-z0-9\s]', ' ', normalized)
-    return [w for w in cleaned.split() if w]
+    return [ASR_TOKEN_VARIANTS.get(w, w) for w in cleaned.split() if w]
 
 
 def _source_tokens_with_words(text):
@@ -147,11 +189,11 @@ def _chapter_heading_matches(sentences, acoustic_words, ac_tokens, ac_map):
                 number = int(match.group(1))
             except ValueError:
                 continue
-        number_tokens = {str(number)}
-        if number == 20:
-            number_tokens.add("twenty")
+        number_tokens = {str(number), match.group(1).replace("-", " ")}
         candidates = []
-        for i in range(min(160, len(ac_tokens) - 1)):
+        # Chapter 1 has a long publisher and content-warning introduction, so
+        # its real heading appears after the first 160 acoustic tokens.
+        for i in range(min(320, len(ac_tokens) - 1)):
             if ac_tokens[i] != "chapter":
                 continue
             for width in (2, 3):
@@ -180,17 +222,6 @@ def _chapter_heading_matches(sentences, acoustic_words, ac_tokens, ac_map):
 
 def _leading_epigraph_attributions(sentences, acoustic_words, ac_tokens, ac_map):
     """Bind a leading audiobook attribution to the printed citation."""
-    prefix_start = prefix_end = None
-    for index in range(min(40, len(ac_tokens))):
-        for prefix in _EPIGRAPH_PREFIXES:
-            if ac_tokens[index:index + len(prefix)] == list(prefix):
-                prefix_start, prefix_end = index, index + len(prefix)
-                break
-        if prefix_end is not None:
-            break
-    if prefix_end is None:
-        return {}
-
     candidates = [
         (idx, s) for idx, s in enumerate(sentences[:8])
         if str(s.get("text", "")).strip().startswith(("—", "–", "--", "- "))
@@ -198,37 +229,50 @@ def _leading_epigraph_attributions(sentences, acoustic_words, ac_tokens, ac_map)
     if not candidates:
         return {}
 
-    search_end = min(len(ac_tokens), prefix_end + 28)
     candidate_indexes = {idx for idx, _ in candidates}
+    opening_limit = min(400, len(ac_tokens))
     for idx, s in enumerate(sentences[:8]):
         if idx in candidate_indexes:
             continue
         source_tokens, _ = _source_tokens_with_words(s.get("text", ""))
         if len(source_tokens) < 3:
             continue
-        exact = _exact_candidate_starts(source_tokens, ac_tokens[prefix_end:])
+        exact = _exact_candidate_starts(source_tokens, ac_tokens[:opening_limit])
         if exact:
-            search_end = min(search_end, prefix_end + exact[0])
-            break
+            opening_limit = min(opening_limit, exact[0])
+
+    prefixes = []
+    for index in range(opening_limit):
+        for prefix in _EPIGRAPH_PREFIXES:
+            if ac_tokens[index:index + len(prefix)] == list(prefix):
+                prefixes.append((index, index + len(prefix)))
+    if not prefixes:
+        return {}
 
     best = None
-    for sentence_idx, sentence in candidates:
-        source_tokens, source_word_indexes = _source_tokens_with_words(sentence["text"])
-        if len(source_tokens) < 3:
-            continue
-        for width in range(max(3, len(source_tokens) - 3), min(len(source_tokens) + 5, search_end - prefix_end + 1)):
-            for start in range(prefix_end, search_end - width + 1):
-                score = difflib.SequenceMatcher(
-                    None, source_tokens, ac_tokens[start:start + width], autojunk=False
-                ).ratio()
-                if best is None or score > best[0]:
-                    best = (score, sentence_idx, source_word_indexes, start, start + width - 1, source_tokens)
+    for prefix_start, prefix_end in prefixes:
+        search_end = min(opening_limit, prefix_end + 28)
+        for sentence_idx, sentence in candidates:
+            source_tokens, source_word_indexes = _source_tokens_with_words(sentence["text"])
+            if len(source_tokens) < 3:
+                continue
+            maximum_width = min(len(source_tokens) + 4, search_end - prefix_end)
+            for width in range(max(3, len(source_tokens) - 3), maximum_width + 1):
+                for start in range(prefix_end, search_end - width + 1):
+                    score = difflib.SequenceMatcher(
+                        None, source_tokens, ac_tokens[start:start + width], autojunk=False
+                    ).ratio()
+                    if best is None or score > best[0]:
+                        best = (
+                            score, prefix_start, sentence_idx, source_word_indexes,
+                            start, start + width - 1, source_tokens,
+                        )
     if best is None or best[0] < 0.55:
         return {}
 
-    score, sentence_idx, source_word_indexes, token_start, token_end, source_tokens = best
+    score, prefix_start, sentence_idx, source_word_indexes, token_start, token_end, source_tokens = best
     word_start, word_end = ac_map[token_start], ac_map[token_end]
-    st = float(acoustic_words[prefix_start]["start"])
+    st = float(acoustic_words[ac_map[prefix_start]]["start"])
     et = float(acoustic_words[word_end]["end"])
     matcher = difflib.SequenceMatcher(None, source_tokens, ac_tokens[token_start:token_end + 1], autojunk=False)
     source_to_audio = {

@@ -102,3 +102,59 @@ class AlignmentEvidenceTests(unittest.TestCase):
         self.assertEqual(attribution["audio_order"], 5)
         self.assertTrue(attribution["has_audio_match"])
         self.assertEqual(result[0]["audio_start"], 10.44)
+
+    def test_chapter_one_long_intro_does_not_hide_heading_or_attribution(self):
+        intro = [f"intro{i}" for i in range(174)]
+        spoken = intro + [
+            "Chapter", "one", "A", "quote", "from", "Article", "One", "Section", "One",
+            "The", "Dragon", "Rider's", "Codex", "A", "dragon", "without", "its", "rider",
+            "is", "a", "tragedy",
+        ]
+        words = [
+            {"word": word, "start": index * 0.5, "end": index * 0.5 + 0.4}
+            for index, word in enumerate(spoken)
+        ]
+        result = self.run_alignment(words, [
+            {"id": "s-0", "text": "A dragon without its rider is a tragedy."},
+            {"id": "s-1", "text": "—Article One, Section One The Dragon Rider’s Codex"},
+            {"id": "s-2", "text": "CHAPTER ONE"},
+        ])
+        self.assertEqual(result[1]["alignment_method"], "leading_epigraph_attribution")
+        self.assertEqual(result[2]["alignment_method"], "chapter_heading_numeric_variant")
+        self.assertEqual(result[0]["alignment_status"], "validated")
+
+    def test_real_chapter_nine_recovered_dialogue_block_aligns_monotonically(self):
+        spoken = "Dain sighs I never said I did not think you can cut it Violet You say it every day I snap Dain laces his fingers behind his neck".split()
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate(spoken)]
+        result = self.run_alignment(words, [
+            {"id": "s-289", "text": "Dain sighs."},
+            {"id": "s-290", "text": "I never said I don’t think you can cut it, Violet."},
+            {"id": "s-291", "text": "You say it every day!"},
+            {"id": "s-292", "text": "I snap."},
+            {"id": "s-300", "text": "Dain laces his fingers behind his neck."},
+        ])
+        self.assertTrue(all(item["alignment_status"] == "validated" for item in result))
+        self.assertEqual([item["audio_start"] for item in result], sorted(item["audio_start"] for item in result))
+
+    def test_real_chapter_twelve_recovered_short_exchange_aligns(self):
+        spoken = "Please do not tell anyone I will not she whispers You are all right Other than having a few years of my life shaved off I laugh".split()
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate(spoken)]
+        result = self.run_alignment(words, [
+            {"id": "s-365", "text": "Please don’t tell anyone."},
+            {"id": "s-366", "text": "I won’t, she whispers."},
+            {"id": "s-367", "text": "You’re all right?"},
+            {"id": "s-368", "text": "Other than having a few years of my life shaved off."},
+            {"id": "s-369", "text": "I laugh."},
+        ])
+        self.assertTrue(all(item["alignment_status"] == "validated" for item in result))
+
+    def test_observed_asr_name_and_number_variants_are_normalized(self):
+        words = [{"word": word, "start": index, "end": index + 0.5} for index, word in enumerate(
+            "Zayden Ryerson. 68 dead. Tern!".split()
+        )]
+        result = self.run_alignment(words, [
+            {"id": "s-1", "text": "Xaden Riorson."},
+            {"id": "s-2", "text": "Sixty-eight dead."},
+            {"id": "s-3", "text": "Tairn!"},
+        ])
+        self.assertTrue(all(item["alignment_status"] == "validated" for item in result))
