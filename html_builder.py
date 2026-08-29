@@ -8,11 +8,14 @@ import html
 import os
 import re
 import sys
+import hashlib
+from pathlib import Path
 from artifact_io import atomic_write_text
 from release_token import ReleaseToken, verify_release_token
 
 def build_master_reader(book_title, book_subtitle, book_author, chapters_config, output_html_path,
-                        *, release_token: ReleaseToken, release_report_path, book_id=None):
+                        *, release_token: ReleaseToken = None, release_report_path, book_id=None,
+                        preview=False):
     """
     chapters_config: list of dicts with:
       - 'num': unique internal track number (e.g. 0, 1, 2)
@@ -31,7 +34,11 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 
     output_html_path = os.path.abspath(output_html_path)
     book_dir = os.path.dirname(output_html_path)
-    verify_release_token(release_token, book_dir, release_report_path)
+    if preview:
+        if release_token is not None:
+            raise ValueError("Preview compilation must not receive a release token")
+    else:
+        verify_release_token(release_token, book_dir, release_report_path)
     with open(release_report_path, encoding="utf-8") as report_file:
         report = json.load(report_file)
     authorized = {
@@ -41,6 +48,8 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
     requested = {os.path.abspath(c["aligned_json"]) for c in chapters_config}
     if requested != authorized:
         raise RuntimeError("HTML compilation chapter set does not match the validated release report")
+
+    report_sha256 = hashlib.sha256(Path(release_report_path).read_bytes()).hexdigest()
 
     loaded_chapters = []
     for c in chapters_config:
@@ -78,8 +87,9 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="reader-release-report-sha256" content="{html.escape(release_token.report_sha256)}">
-<title>{html.escape(book_title)}: {html.escape(book_subtitle)}</title>
+<meta name="reader-release-report-sha256" content="{html.escape(report_sha256)}">
+<meta name="reader-build-kind" content="{'experimental-preview' if preview else 'release'}">
+<title>{html.escape(('EXPERIMENTAL PREVIEW — ' if preview else '') + book_title)}: {html.escape(book_subtitle)}</title>
 <script>
 (function() {{
   var bId = {json.dumps(book_id)};
