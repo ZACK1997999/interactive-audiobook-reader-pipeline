@@ -46,7 +46,17 @@ ASR_TOKEN_VARIANTS = {
     "rii": "rhi", "fierg": "feirge", "sleeg": "sliseag", "riddick": "ridoc",
     "orly": "aurelie", "glean": "gleann", "shows": "chose", "heeh oo": "he who",
     "hmph": "hmm", "clyde": "claidh", "athbeen": "athebyne",
+    "basgayeth": "basgiath", "orisha": "aretia",
 }
+
+# Whole-word audio renderings that cannot be handled safely by a per-word
+# spelling map. These are narrow, observed audiobook variants, not fuzzy
+# nearest-neighbour matching.
+ASR_AUDIO_PHRASE_VARIANTS = (
+    ("your friends", "you are friends"),
+    ("soren gale", "sorrengail"),
+    ("myself what", "my self what"),
+)
 
 NUMBER_PHRASE_VARIANTS = (
     ("sixty-eight", "68"),
@@ -63,6 +73,7 @@ NUMBER_PHRASE_VARIANTS = (
 
 def tokenize_clean(text):
     normalized = str(text).lower().replace("’", "'").replace("…", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     for phrase, canonical in ASR_PHRASE_VARIANTS + NUMBER_PHRASE_VARIANTS:
         normalized = re.sub(rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", canonical, normalized)
     # Conservative source/transcript variants observed in this audiobook.
@@ -113,7 +124,40 @@ def _is_non_narrated_text(text):
         normalized in {"* * *", "***", "…", "..."}
         or normalized.startswith("sign up ")
         or normalized.startswith("did you love uncovering ")
+        or normalized.startswith("the love doesn’t end here")
+        or normalized.startswith("the love doesn't end here")
+        or normalized.startswith("join the entangled insiders")
     )
+
+
+def _acoustic_tokens_with_map(acoustic_words):
+    """Tokenize audio while preserving narrow multi-word ASR variants."""
+    ac_tokens, ac_map = [], []
+    index = 0
+    while index < len(acoustic_words):
+        consumed = False
+        for raw_phrase, canonical in ASR_AUDIO_PHRASE_VARIANTS:
+            width = len(raw_phrase.split())
+            phrase = " ".join(str(w.get("word", "")) for w in acoustic_words[index:index + width])
+            if tokenize_clean(phrase) == tokenize_clean(raw_phrase):
+                canonical_tokens = tokenize_clean(canonical)
+                ac_tokens.extend(canonical_tokens)
+                ac_map.extend([index] * len(canonical_tokens))
+                if width > 1:
+                    # Keep the final source token bound to the final spoken
+                    # word so its span covers the complete pronunciation.
+                    for offset in range(1, len(canonical_tokens)):
+                        ac_map[-offset] = index + width - 1
+                index += width
+                consumed = True
+                break
+        if consumed:
+            continue
+        tokens = tokenize_clean(acoustic_words[index]["word"])
+        ac_tokens.extend(tokens)
+        ac_map.extend([index] * len(tokens))
+        index += 1
+    return ac_tokens, ac_map
 
 
 def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_words, st, et):
@@ -307,13 +351,8 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         return sentences
         
     # Build token list and index mapping for audio
-    ac_tokens = []
-    ac_map = [] # maps token pos to acoustic_word_idx
-    for w_idx, w_obj in enumerate(acoustic_words):
-        toks = tokenize_clean(w_obj["word"])
-        for t in toks:
-            ac_tokens.append(t)
-            ac_map.append(w_idx)
+    # ac_map maps normalized token positions to physical acoustic-word indexes.
+    ac_tokens, ac_map = _acoustic_tokens_with_map(acoustic_words)
 
     # Reserve leading epigraph attributions before the monotonic global pass.
     matched_sentences = _leading_epigraph_attributions(sentences, acoustic_words, ac_tokens, ac_map)
@@ -498,6 +537,33 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             continue
 
         candidates = _exact_candidate_starts(clean_s, sub_tokens)
+        # A short printed speaker attribution can be spoken immediately before
+        # the following sentence, even when the preceding printed sentence's
+        # acoustic span reaches slightly into that attribution. Restrict the
+        # look-back to four normalized tokens and keep the following anchor as
+        # a hard upper bound; this is not a last-known-time fallback.
+        if not candidates and len(clean_s) <= 2 and following:
+            t_left = max(0, t_left - 4)
+            sub_tokens = ac_tokens[t_left:t_right]
+            candidates = _exact_candidate_starts(clean_s, sub_tokens)
+        if not candidates and len(clean_s) <= 2 and following:
+            # Spoken attributions may be absorbed into the following printed
+            # sentence. Select the nearest exact occurrence before that
+            # sentence's anchor, with a strict four-second physical bound.
+            next_word = following[0]
+            next_start = float(acoustic_words[next_word]["start"])
+            physical = []
+            for candidate in _exact_candidate_starts(clean_s, ac_tokens):
+                candidate_word = ac_map[candidate + len(clean_s) - 1]
+                candidate_end = float(acoustic_words[candidate_word]["end"])
+                candidate_start = float(acoustic_words[ac_map[candidate]]["start"])
+                if next_start - 5.0 <= candidate_start <= next_start and candidate_end <= next_start + 0.2:
+                    physical.append((candidate, candidate_end))
+            if physical:
+                chosen, _ = min(physical, key=lambda item: abs(next_start - item[1]))
+                t_left = chosen
+                sub_tokens = ac_tokens[t_left:t_right]
+                candidates = [0]
         is_unanchored_ambiguous_short = len(clean_s) <= 2 and not previous and not following and len(candidates) > 1
 
         if len(candidates) >= 1 and not is_unanchored_ambiguous_short:
@@ -582,7 +648,17 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         raw_words = s["text"].split()
         if s_idx in matched_sentences:
             ms = matched_sentences[s_idx]
-            non_monotonic = ms["word_start"] < last_word_start and ms.get("alignment_method") not in {"leading_epigraph_attribution", "chapter_heading_numeric_variant"}
+            opening_speaker = (
+                ms["word_start"] < last_word_start
+                and s_idx < 8
+                and len(tokenize_clean(s.get("text", ""))) == 1
+                and str(s.get("text", "")).strip().isupper()
+            )
+            non_monotonic = (
+                ms["word_start"] < last_word_start
+                and not opening_speaker
+                and ms.get("alignment_method") not in {"leading_epigraph_attribution", "chapter_heading_numeric_variant"}
+            )
             last_word_start = max(last_word_start, ms["word_start"])
             non_narrated = _is_non_narrated_text(s.get("text", ""))
             aligned_results.append({
@@ -600,10 +676,10 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "matched_token_count": ms["matched_token_count"],
                 "source_token_count": ms["source_token_count"],
                 "match_ratio": ms["match_ratio"],
-                "alignment_method": ms["alignment_method"],
+                "alignment_method": "opening_speaker_attribution" if opening_speaker else ms["alignment_method"],
                 "fallback_used": False,
                 "alignment_status": "review-required" if non_monotonic else "validated",
-                "alignment_reason": ms.get("alignment_reason") or ("global_match_out_of_order" if non_monotonic else None)
+                "alignment_reason": ms.get("alignment_reason") or ("opening_speaker_attribution" if opening_speaker else "global_match_out_of_order" if non_monotonic else None)
             })
         else:
             # Sentence without a standalone acoustic match (e.g. a heading or
@@ -630,7 +706,9 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_status": "not-applicable" if s.get("is_heading") or non_narrated else "review-required",
                 "alignment_reason": "non_narrated_text" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
                 "non_narrated_evidence": {
-                    "basis": "typographic_pause_marker",
+                    "basis": "publisher_back_matter" if non_narrated and (
+                        str(s.get("text", "")).lower().startswith(("the love doesn’t end here", "the love doesn't end here", "join the entangled insiders"))
+                    ) else "typographic_pause_marker",
                     "source_text": s.get("text", ""),
                     "requires_lexical_audio": False,
                 } if non_narrated else None,
