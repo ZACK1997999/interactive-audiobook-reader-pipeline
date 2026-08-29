@@ -78,13 +78,46 @@ python3 industrial_orchestrator.py \
 
 ### 3. Automated Publishing & Shelf Registration
 
-Publish aligned readers to Cloudflare R2 and update the library catalog:
+Run the deployment preflight before any expensive processing or publication:
 
 ```bash
-reader-publish /path/to/publisher_config.json
+python3 deployment_preflight.py --config /path/to/publisher_config.json
+```
+
+The preflight is fail-closed. It checks the actual portal repository, deployment
+entrypoint, branch, required release inputs, and reports when repository visibility
+must be checked in GitHub/Cloudflare. It does not upload, push, or publish anything.
+
+Publish aligned readers through the single release entry point:
+
+```bash
+reader-release /path/to/publisher_config.json --dry-run
+reader-release /path/to/publisher_config.json
 ```
 
 See [`publisher_config.example.json`](publisher_config.example.json) for the configuration schema.
+
+The example is not a live configuration. Create a local, ignored
+`publisher_config.json` for each deployment target. Keep credentials in the
+environment or a secret manager. This project deliberately does not infer the
+public portal from the current code repository: in the existing setup, the reader
+pipeline repository and `/Users/lindy/Vault/Audible` portal repository are separate
+systems. A private portal repository can therefore affect Pages/Cloudflare builds
+even when local release validation passes.
+
+For the legacy chunked portal, the safe order is:
+
+```text
+quality gate -> semantic gate -> HTML smoke check -> deployment preflight
+-> portal build/chunk -> portal repository status/branch check -> explicit push
+-> public URL and audio range verification
+```
+
+`reader-publish` remains available as a lower-level compatibility command, but it
+must not be called directly for a production release. Never run the legacy
+all-books script as an implicit post-processing step. Select one book, one source
+HTML, one portal branch, and record the resulting commit and public URL in the
+release journal.
 
 ---
 

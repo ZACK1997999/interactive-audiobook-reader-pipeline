@@ -29,6 +29,8 @@ def _config(root: Path):
         "cover": str(cover), "portal_repo": str(root / "portal"),
         "manifest_entry": {"id": "book", "title": "Book"},
         "public_reader_url": "https://example.test/books/book/",
+        "hosting_provider": "cloudflare_pages", "cloudflare_project": "test-project",
+        "deployment_mode": "manifest_publisher",
     }
 
 

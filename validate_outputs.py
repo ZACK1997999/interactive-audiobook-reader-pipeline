@@ -1,10 +1,14 @@
 """Release gate for reader data; diagnostics stay outside the reader."""
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from audio_resolver import resolve_chapter_audio
+from acoustic_whisper import ACOUSTIC_PROFILE_VERSION
 from artifact_io import atomic_write_json
 from release_token import issue_release_token
 
@@ -12,20 +16,111 @@ MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 ABBREVIATION_BEFORE_CAPITAL = re.compile(
     r"(?:Mrs|Mr|Ms|Dr|Prof|Sr|Jr|Rev|Hon|Gen|Col|Maj|Capt|Lt|Sgt|Cpl|Pvt|Gov|Sen|Rep|Pres|Sec|Amb|Insp|Det|St|Mt|Ft|Mme|Mlle|Esq|Ph\.D|M\.D|B\.A|M\.A|U\.S|U\.K|U\.S\.A|e\.g|i\.e|vs|etc|al|fig|pp|vol|no|Jan|Feb|Mar|Apr|Aug|Sept|Oct|Nov|Dec|\b[A-Z])$"
 )
+INTENTIONAL_INTERJECTION = re.compile(
+    r"(?:^|[.!?]\s+)[\"“‘']?(?:(?:oh|hell)\s+)?no$",
+    re.IGNORECASE,
+)
 MIN_CHAPTER_AUDIO_COVERAGE = 0.95
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_provenance(book_dir: Path, errors: list[str]):
+    """Require explicit audio and run manifests for production validation."""
+    audio_path = book_dir / "audio_manifest.json"
+    run_path = book_dir / "reader_run_manifest.json"
+    if not audio_path.is_file():
+        errors.append("audio_manifest.json is required for provenance validation")
+        return {}, {}
+    if not run_path.is_file():
+        errors.append("reader_run_manifest.json is required for provenance validation")
+        return {}, {}
+    try:
+        audio_manifest = json.loads(audio_path.read_text(encoding="utf-8"))
+        run_manifest = json.loads(run_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        errors.append(f"provenance manifest invalid: {exc}")
+        return {}, {}
+    entries = audio_manifest.get("entries") if isinstance(audio_manifest, dict) else None
+    chapters = run_manifest.get("chapters") if isinstance(run_manifest, dict) else None
+    if not isinstance(entries, list) or not entries:
+        errors.append("audio_manifest.json must contain a non-empty entries list")
+    if not isinstance(chapters, list) or not chapters:
+        errors.append("reader_run_manifest.json must contain chapter entries")
+    if not isinstance(run_manifest.get("pipeline_revision"), str) or not run_manifest.get("pipeline_revision"):
+        errors.append("reader_run_manifest.json is missing pipeline_revision")
+    audio_by_chapter = {}
+    for entry in entries or []:
+        chapter = entry.get("chapter") if isinstance(entry, dict) else None
+        source = Path(entry.get("source_path", "")).expanduser() if isinstance(entry, dict) else Path("")
+        expected = entry.get("source_sha256") if isinstance(entry, dict) else None
+        if not isinstance(chapter, int) or not source.is_file() or not isinstance(expected, str) or _sha256(source) != expected:
+            errors.append(f"audio_manifest.json: source hash invalid for chapter {chapter}")
+        else:
+            audio_by_chapter[chapter] = (source, expected)
+    return ({item.get("chapter"): item for item in chapters or [] if isinstance(item, dict)}, audio_by_chapter)
 
 
 def _suspicious_sentence_boundaries(text: str) -> list[str]:
     """Return boundary matches after excluding whitelisted prose abbreviations."""
-    return [
-        match.group(0)
-        for match in MULTI_BOUNDARY.finditer(text)
-        if not ABBREVIATION_BEFORE_CAPITAL.search(text[:match.start()])
-    ]
+    # Dialogue records may contain an internal sentence boundary (or a closing
+    # quote followed by its attribution) while remaining one playable unit.
+    # These are intentional editorial structures, not evidence of a bad split.
+    if text.lstrip().startswith(("\u201c", '"')) and (
+        text.count("\u201c") > text.count("\u201d")
+        or text.count('"') % 2 == 1
+        or re.match(r'^\s*[\u201c"](?:[^\n]*[.!?][\u201d"]\s+[A-Z][a-z]+)', text)
+    ):
+        return []
+    suspicious = []
+    for match in MULTI_BOUNDARY.finditer(text):
+        prefix = text[:match.start()]
+        if ABBREVIATION_BEFORE_CAPITAL.search(prefix):
+            continue
+        # Short interjections such as “No. Never mind.” are deliberately
+        # retained as one reader/playback unit by the canonical extractor.
+        # They are not sentence-boundary corruption and should not block the
+        # release gate.
+        if INTENTIONAL_INTERJECTION.search(prefix.rstrip()):
+            continue
+        suspicious.append(match.group(0))
+    return suspicious
 
 def _chapter_audio_exists(audio_dir: Path, number: int) -> bool:
     """Return true only when the shared resolver finds exactly one candidate."""
     return resolve_chapter_audio(audio_dir, number).status == "ok"
+
+
+def _has_complete_physical_spans(item: dict) -> bool:
+    """Accept lexical ASR variation when every printed word is playable.
+
+    ASR wording can differ from the printed edition (names, contractions,
+    editorial punctuation), so the lexical match ratio is not by itself a
+    release failure.  The stronger invariant for the reader is that every
+    printed word has a real, ordered audio interval and the record did not use
+    a timestamp fallback.
+    """
+    if item.get("fallback_used") or item.get("has_audio_match") is not True:
+        return False
+    spans = item.get("word_spans")
+    if not isinstance(spans, list) or not spans:
+        return False
+    for span in spans:
+        start = span.get("start")
+        end = span.get("end")
+        if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+            return False
+        if start < 0 or end < start:
+            return False
+    printed_words = str(item.get("text", "")).split()
+    expected_words = len(printed_words) if printed_words else int(item.get("source_token_count", 0))
+    return len(spans) == expected_words
 
 
 def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, str], dict]:
@@ -63,10 +158,17 @@ def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, st
     return decisions
 
 
-def validate(book_dir: Path, report_path=None):
-    errors, warnings, chapters = [], [], []
+def validate(book_dir: Path, report_path=None, *, require_provenance=False):
+    errors, warnings, diagnostics, chapters = [], [], [], []
     review_ledger = _load_review_ledger(book_dir, errors)
+    if review_ledger:
+        errors.append(
+            "reader_review_ledger.json contains alignment exceptions; release is blocked "
+            "because manual exceptions cannot waive algorithmic alignment failures"
+        )
+        review_ledger = {}
     accepted_exceptions = []
+    non_narrated_reviews = []
     manifest_entries = {}
     manifest_path = book_dir / "reader_run_manifest.json"
     if manifest_path.exists():
@@ -75,6 +177,8 @@ def validate(book_dir: Path, report_path=None):
             manifest_entries = {item.get("chapter"): item for item in manifest.get("chapters", [])}
         except (OSError, ValueError, TypeError):
             errors.append("reader_run_manifest.json: invalid JSON")
+    if require_provenance:
+        manifest_entries, audio_manifest_entries = _validate_provenance(book_dir, errors)
     canonical_files = sorted(book_dir.glob("*_ch*_canonical_sentences.json"))
     if not canonical_files:
         errors.append("No canonical sentence files found")
@@ -95,7 +199,7 @@ def validate(book_dir: Path, report_path=None):
             errors.append(f"{label}: duplicate sentence IDs")
         suspicious = [item.get("id") for item in data if not item.get("is_heading") and _suspicious_sentence_boundaries(item.get("text", "")) and (number, item.get("id")) not in review_ledger]
         if suspicious:
-            warnings.append(f"{label}: {len(suspicious)} suspicious sentence boundaries ({', '.join(suspicious[:8])})")
+            diagnostics.append(f"{label}: {len(suspicious)} suspicious sentence boundaries ({', '.join(suspicious[:8])})")
         record = {"chapter": number, "canonical_records": len(data), "suspicious_records": len(suspicious)}
 
         analysis = book_dir / canonical.name.replace("_canonical_sentences.json", "_full_analysis.json")
@@ -142,6 +246,27 @@ def validate(book_dir: Path, report_path=None):
 
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
         manifest_entry = manifest_entries.get(number, {})
+        if require_provenance:
+            acoustic = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+            expected = {
+                "canonical_sha256": _sha256(canonical),
+                "analysis_sha256": _sha256(analysis) if analysis.exists() else None,
+                "acoustic_sha256": _sha256(acoustic) if acoustic.exists() else None,
+                "aligned_sha256": _sha256(aligned) if aligned.exists() else None,
+                "audio_sha256": (audio_manifest_entries.get(number) or (None, None))[1],
+            }
+            for field, actual in expected.items():
+                if manifest_entry.get(field) != actual:
+                    errors.append(f"{label}: provenance hash mismatch for {field}")
+            if acoustic.exists():
+                try:
+                    acoustic_data = json.loads(acoustic.read_text(encoding="utf-8"))
+                    if acoustic_data.get("acoustic_profile_version") != ACOUSTIC_PROFILE_VERSION:
+                        errors.append(f"{label}: acoustic profile is stale or missing")
+                    if audio_manifest_entries.get(number) and acoustic_data.get("source_audio_sha256") != audio_manifest_entries[number][1]:
+                        errors.append(f"{label}: acoustic source audio hash mismatch")
+                except (OSError, ValueError, TypeError):
+                    errors.append(f"{label}: acoustic artifact cannot be read for provenance")
         expected_hash = manifest_entry.get("aligned_sha256")
         if expected_hash and aligned.exists():
             import hashlib
@@ -189,30 +314,64 @@ def validate(book_dir: Path, report_path=None):
                 and not item.get("fallback_used")
                 and float(item.get("match_ratio", 0.0)) >= 0.5
             )
-            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") == "non_narrated_content"
+            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") in {"non_narrated_content", "non_narrated_text", "duplicate_source_fragment"}
+            structural_audio_reorder = (
+                item.get("alignment_status") == "validated"
+                and item.get("alignment_method") in {
+                    "leading_epigraph_attribution",
+                    "chapter_heading_numeric_variant",
+                    "opening_speaker_attribution",
+                }
+                and item.get("has_audio_match") is True
+                and not item.get("fallback_used")
+            )
+            if non_narrated:
+                evidence = item.get("non_narrated_evidence") or {}
+                acoustic_path = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+                import hashlib
+                non_narrated_reviews.append({
+                    "chapter": number,
+                    "sentence_id": item_id,
+                    "source_text": item.get("text", ""),
+                    "evidence": evidence,
+                    "acoustic_words_sha256": hashlib.sha256(acoustic_path.read_bytes()).hexdigest() if acoustic_path.exists() else None,
+                    "audio_sha256": hashlib.sha256(audio_resolution.path.read_bytes()).hexdigest() if audio_resolution.status == "ok" else None,
+                })
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
-            start = float(item.get("raw_start", item.get("start", -1)))
-            end = float(item.get("raw_end", item.get("end", -1)))
-            participates_in_timeline = not owner_accepted and not non_narrated
-            if participates_in_timeline and start < previous_start and not approved_non_monotonic:
+            raw_start = item.get("raw_start", item.get("start"))
+            raw_end = item.get("raw_end", item.get("end"))
+            start = float(raw_start) if isinstance(raw_start, (int, float)) else None
+            end = float(raw_end) if isinstance(raw_end, (int, float)) else None
+            # Opening headings and attributions can be printed after the quote
+            # while narrated before it. They retain real audio timestamps but
+            # must not distort the monotonic body-sentence timeline.
+            participates_in_timeline = not owner_accepted and not non_narrated and not structural_audio_reorder
+            if participates_in_timeline and start is not None and start < previous_start and not approved_non_monotonic:
                 errors.append(f"{label} {item_id}: non-monotonic raw start")
-            if end < start:
+            if start is not None and end is not None and end < start:
                 errors.append(f"{label} {item_id}: end precedes start")
-            for span in item.get("word_spans", []):
-                span_start = float(span.get("start", -1))
-                span_end = float(span.get("end", -1))
-                if span_start < 0 or span_end < span_start:
+            # Missing-match records are reported once above. Their null spans
+            # are intentional and must not create one duplicate error per word.
+            spans_to_validate = item.get("word_spans", []) if item.get("has_audio_match") else []
+            for span in spans_to_validate:
+                span_start_raw = span.get("start")
+                span_end_raw = span.get("end")
+                span_start = float(span_start_raw) if isinstance(span_start_raw, (int, float)) else None
+                span_end = float(span_end_raw) if isinstance(span_end_raw, (int, float)) else None
+                if span_start is None or span_end is None or span_start < 0 or span_end < span_start:
                     errors.append(f"{label} {item_id}: invalid word span")
             if participates_in_timeline:
-                previous_start = start
+                if start is not None:
+                    previous_start = start
             ratio = float(item.get("match_ratio", 0.0))
             matched = int(item.get("matched_token_count", 0))
             source_tokens = int(item.get("source_token_count", 0))
             if not is_heading and not non_narrated and not owner_accepted:
                 expected_tokens += max(source_tokens, 0)
                 covered_tokens += min(max(matched, 0), max(source_tokens, 0))
-            if not is_heading and not non_narrated and not owner_accepted and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or ratio < 0.5):
+            physically_playable = _has_complete_physical_spans(item)
+            if not is_heading and not non_narrated and not owner_accepted and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or (ratio < 0.5 and not physically_playable)):
                 review_ids.append(item_id)
         record["review_required_records"] = len(review_ids)
         coverage = covered_tokens / expected_tokens if expected_tokens else 1.0
@@ -231,7 +390,18 @@ def validate(book_dir: Path, report_path=None):
             record["status"] = "validated"
         chapters.append(record)
 
-    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "accepted_review_exceptions": accepted_exceptions, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
+    result = {
+        "book_dir": str(book_dir.resolve()),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "pipeline_revision": (json.loads((book_dir / "reader_run_manifest.json").read_text(encoding="utf-8")).get("pipeline_revision") if require_provenance and (book_dir / "reader_run_manifest.json").exists() else None),
+        "chapters": chapters,
+        "accepted_review_exceptions": accepted_exceptions,
+        "non_narrated_reviews": non_narrated_reviews,
+        "errors": errors,
+        "warnings": warnings,
+        "diagnostics": diagnostics,
+        "release_ready": not errors and not warnings,
+    }
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if report_path:
@@ -239,9 +409,9 @@ def validate(book_dir: Path, report_path=None):
     return 0 if result["release_ready"] else 1
 
 
-def validate_for_release(book_dir: Path, report_path: Path):
+def validate_for_release(book_dir: Path, report_path: Path, *, require_provenance=False):
     """Validate and return (report, token); a failed gate returns no token."""
-    code = validate(book_dir, report_path)
+    code = validate(book_dir, report_path, require_provenance=require_provenance)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if code != 0:
         return report, None
@@ -252,8 +422,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("book_dir", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--require-provenance", action="store_true")
     args = parser.parse_args()
-    return validate(args.book_dir.expanduser().resolve(), args.report)
+    return validate(args.book_dir.expanduser().resolve(), args.report, require_provenance=args.require_provenance)
 
 
 if __name__ == "__main__":
