@@ -102,6 +102,24 @@ def _is_acoustic_ready(path: Path, *, require_current_profile: bool = False) -> 
         return False
 
 
+def _acoustic_preflight(*, allow_rebuild=False):
+    """Check acoustic inputs before any downstream stage can mutate outputs."""
+    blocked = []
+    for ch in range(1, TOTAL_CHAPTERS + 1):
+        path = AUDIO_DIR / f'fourth_wing_ch{ch:02d}_acoustic_words.json'
+        if path.exists() and not _is_acoustic_ready(path, require_current_profile=True) and not allow_rebuild:
+            blocked.append(path.name)
+    if blocked:
+        print(
+            '[Acoustic PREFLIGHT BLOCKED] Existing acoustic artifacts need an explicit '
+            f'rebuild decision: {", ".join(blocked)}',
+            file=sys.stderr,
+            flush=True,
+        )
+        return False
+    return True
+
+
 def _is_analysis_ready(path: Path, canonical_path: Path) -> bool:
     if not path.is_file() or path.stat().st_size < 100:
         return False
@@ -122,8 +140,9 @@ def _is_analysis_ready(path: Path, canonical_path: Path) -> bool:
         return False
 
 
-def run_acoustic_loop():
+def run_acoustic_loop(*, allow_rebuild=False, result=None):
     print('=== [Acoustic Worker Thread Started] ===', flush=True)
+    succeeded = True
     for ch in range(1, TOTAL_CHAPTERS + 1):
         prefix = f'fourth_wing_ch{ch:02d}'
         audio_file = AUDIO_DIR / f'chapter_{ch:02d}.mp3'
@@ -136,6 +155,20 @@ def run_acoustic_loop():
             print(f'[Acoustic] Chapter {ch:02d} already complete: {acoustic_out.name}', flush=True)
             continue
 
+        # Never silently replace an existing acoustic artifact.  Historical
+        # Agy output may be perfectly usable but not reproducible under the
+        # current profile; only an explicit operator flag may rebuild it.
+        if acoustic_out.exists() and not allow_rebuild:
+            print(
+                f'[Acoustic BLOCKED] Chapter {ch:02d} has an existing artifact '
+                f'without the current acoustic profile. Refusing implicit rebuild; '
+                f'use --rebuild-acoustic only after an explicit acoustic decision.',
+                file=sys.stderr,
+                flush=True,
+            )
+            succeeded = False
+            continue
+
         print(f'[Acoustic] Processing Chapter {ch:02d}/{TOTAL_CHAPTERS} ({audio_file.name})...', flush=True)
         t0 = time.time()
         try:
@@ -144,7 +177,11 @@ def run_acoustic_loop():
             print(f'[Acoustic] Chapter {ch:02d} finished in {elapsed:.1f}s -> {acoustic_out.name}', flush=True)
         except Exception as exc:
             print(f'[Acoustic ERROR] Chapter {ch:02d} failed: {exc}', file=sys.stderr, flush=True)
+            succeeded = False
     print('=== [Acoustic Worker Thread Finished All Chapters] ===', flush=True)
+    if result is not None:
+        result.append(succeeded)
+    return succeeded
 
 
 def process_chapter_linguistics(ch: int, base_prompt: str):
@@ -225,7 +262,7 @@ def run_bounded_acoustic_repairs():
     return results
 
 
-def run_pipeline():
+def run_pipeline(*, allow_acoustic_rebuild=False):
     print('================================================================================', flush=True)
     print('      Starting Industrial End-to-End Pipeline for Fourth Wing (39 Chapters)     ', flush=True)
     print('================================================================================', flush=True)
@@ -233,6 +270,9 @@ def run_pipeline():
     audio_files = [AUDIO_DIR / f"chapter_{ch:02d}.mp3" for ch in range(1, TOTAL_CHAPTERS + 1)]
     if not all(path.is_file() for path in audio_files):
         print("[ERROR] Explicit chapter audio set is incomplete; halting before processing.", file=sys.stderr, flush=True)
+        return 1
+    if not _acoustic_preflight(allow_rebuild=allow_acoustic_rebuild):
+        _write_run_manifest("blocked-acoustic-provenance")
         return 1
     write_audio_manifest(
         BOOK_DIR / "audio_manifest.json",
@@ -243,7 +283,13 @@ def run_pipeline():
     base_prompt = PROMPT_PATH.read_text(encoding='utf-8')
 
     # Start Acoustic Worker in a dedicated background thread
-    acoustic_thread = threading.Thread(target=run_acoustic_loop, daemon=True, name='AcousticWorker')
+    acoustic_result = []
+    acoustic_thread = threading.Thread(
+        target=run_acoustic_loop,
+        kwargs={"allow_rebuild": allow_acoustic_rebuild, "result": acoustic_result},
+        daemon=True,
+        name='AcousticWorker',
+    )
     acoustic_thread.start()
 
     # Run Linguistic Analysis across chapters
@@ -255,6 +301,16 @@ def run_pipeline():
 
     print('=== [Waiting for Acoustic Extraction to Complete] ===', flush=True)
     acoustic_thread.join()
+
+    if not acoustic_result or not acoustic_result[0]:
+        print(
+            '[ERROR] Acoustic stage blocked or failed. Existing artifacts were not '
+            'silently replaced; resolve provenance or explicitly authorize a rebuild.',
+            file=sys.stderr,
+            flush=True,
+        )
+        _write_run_manifest("blocked-acoustic-provenance")
+        return 1
 
     # Align any remaining chapters
     print('=== [Finalizing Dynamic Alignment Across All 39 Chapters] ===', flush=True)
@@ -347,4 +403,13 @@ def run_pipeline():
 
 
 if __name__ == '__main__':
-    raise SystemExit(run_pipeline())
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Run the Fourth Wing industrial pipeline.')
+    parser.add_argument(
+        '--rebuild-acoustic',
+        action='store_true',
+        help='Explicitly permit rebuilding existing acoustic artifacts with the current profile.',
+    )
+    args = parser.parse_args()
+    raise SystemExit(run_pipeline(allow_acoustic_rebuild=args.rebuild_acoustic))
