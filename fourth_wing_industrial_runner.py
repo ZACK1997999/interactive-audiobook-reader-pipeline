@@ -88,25 +88,6 @@ def _alignment_is_current(ch: int, aligned_path: Path) -> bool:
     return all(entry.get(key) == value for key, value in current.items())
 
 
-def _backfill_acoustic_provenance(ch: int) -> bool:
-    """Bind a current-profile artifact to its source audio without retranscribing."""
-    acoustic_path = AUDIO_DIR / f"fourth_wing_ch{ch:02d}_acoustic_words.json"
-    audio_path = AUDIO_DIR / f"chapter_{ch:02d}.mp3"
-    if not _is_acoustic_ready(acoustic_path, require_current_profile=True) or not audio_path.is_file():
-        return False
-    try:
-        data = json.loads(acoustic_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return False
-    source_hash = _sha256(audio_path)
-    if data.get("source_audio_sha256") == source_hash:
-        return False
-    data["source_audio_sha256"] = source_hash
-    atomic_write_json(acoustic_path, data)
-    print(f"[Acoustic] Chapter {ch:02d} provenance metadata backfilled.", flush=True)
-    return True
-
-
 def _is_acoustic_ready(path: Path, *, require_current_profile: bool = False) -> bool:
     if not path.is_file() or path.stat().st_size < 1000:
         return False
@@ -152,7 +133,6 @@ def run_acoustic_loop():
         # acoustic profile is part of the reproducibility contract: if it is
         # stale, regenerate it before alignment or bounded repair.
         if _is_acoustic_ready(acoustic_out, require_current_profile=True):
-            _backfill_acoustic_provenance(ch)
             print(f'[Acoustic] Chapter {ch:02d} already complete: {acoustic_out.name}', flush=True)
             continue
 
