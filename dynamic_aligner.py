@@ -745,7 +745,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             continue
         previous = [matched_sentences[i]["word_end"] for i in range(s_idx) if i in matched_sentences]
         following = [matched_sentences[i]["word_start"] for i in range(s_idx + 1, len(sentences)) if i in matched_sentences]
-        if previous and following and not _has_nearby_exact_audio(
+        if len(_source_tokens_with_words(sentence.get("text", ""))[0]) >= 4 and previous and following and not _has_nearby_exact_audio(
             _source_tokens_with_words(sentence.get("text", ""))[0],
             acoustic_words, ac_tokens, ac_map, following[0],
         ):
