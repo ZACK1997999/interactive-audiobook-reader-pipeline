@@ -43,6 +43,7 @@ def run_mlx_acoustic_extraction(
     
     words_list = []
     segments_list = []
+    dropped_zero_duration_words = 0
     
     for seg in result.get("segments", []):
         segments_list.append({
@@ -56,8 +57,14 @@ def run_mlx_acoustic_extraction(
                 raise ValueError("acoustic backend returned a word without text")
             if not isinstance(w.get("start"), (int, float)) or not isinstance(w.get("end"), (int, float)):
                 raise ValueError("acoustic backend returned a word without timestamps")
-            if not math.isfinite(float(w["start"])) or not math.isfinite(float(w["end"])) or float(w["end"]) <= float(w["start"]):
+            if not math.isfinite(float(w["start"])) or not math.isfinite(float(w["end"])) or float(w["end"]) < float(w["start"]):
                 raise ValueError("acoustic backend returned an invalid word timestamp")
+            if float(w["end"]) == float(w["start"]):
+                # MLX can emit zero-duration boundary tokens. They cannot be
+                # used for alignment, so discard and expose the count rather
+                # than corrupting the artifact or aborting the whole chapter.
+                dropped_zero_duration_words += 1
+                continue
             words_list.append({
                 "word": w.get("word"),
                 "start": round(w.get("start", 0.0), 2),
@@ -72,6 +79,7 @@ def run_mlx_acoustic_extraction(
         "source_audio_sha256": hashlib.sha256(Path(audio_path).read_bytes()).hexdigest() if Path(audio_path).is_file() else None,
         "transcription_options": ACOUSTIC_TRANSCRIPTION_OPTIONS,
         "word_timestamps": True,
+        "dropped_zero_duration_words": dropped_zero_duration_words,
         "segments": segments_list,
         "words": words_list
     }

@@ -55,14 +55,28 @@ class AcousticWhisperTests(unittest.TestCase):
             self.assertFalse(_is_acoustic_ready(legacy, require_current_profile=True))
             self.assertTrue(_is_acoustic_ready(current, require_current_profile=True))
 
-    def test_extraction_rejects_missing_or_invalid_word_timestamps(self):
+    def test_extraction_rejects_reverse_word_timestamps(self):
         def fake_transcribe(audio_path, **kwargs):
-            return {"segments": [{"words": [{"word": "broken", "start": 2.0, "end": 2.0}]}]}
+            return {"segments": [{"words": [{"word": "broken", "start": 2.0, "end": 1.0}]}]}
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "acoustic.json"
             with self.assertRaises(ValueError):
                 run_mlx_acoustic_extraction("chapter.mp3", output, transcribe_fn=fake_transcribe)
+
+    def test_extraction_records_and_discards_zero_duration_words(self):
+        def fake_transcribe(audio_path, **kwargs):
+            return {"segments": [{"words": [
+                {"word": "boundary", "start": 2.0, "end": 2.0},
+                {"word": "valid", "start": 2.0, "end": 2.5},
+            ]}]}
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "acoustic.json"
+            result = run_mlx_acoustic_extraction("chapter.mp3", output, transcribe_fn=fake_transcribe)
+
+        self.assertEqual(result["dropped_zero_duration_words"], 1)
+        self.assertEqual([word["word"] for word in result["words"]], ["valid"])
 
 
 if __name__ == "__main__":
