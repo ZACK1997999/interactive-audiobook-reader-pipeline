@@ -273,6 +273,7 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
                 and item.get("alignment_method") in {
                     "leading_epigraph_attribution",
                     "chapter_heading_numeric_variant",
+                    "opening_speaker_attribution",
                 }
                 and item.get("has_audio_match") is True
                 and not item.get("fallback_used")
