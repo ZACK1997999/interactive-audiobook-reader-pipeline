@@ -37,7 +37,7 @@ from run_manifest import update_manifest
 from artifact_io import atomic_write_json
 from chapter_metadata import load_chapter_metadata
 
-BOOK_DIR = Path('/Users/lindy/Vault/audiobook/Fourth Wing').resolve()
+BOOK_DIR = Path(os.environ.get('FOURTH_WING_BOOK_DIR', '/Users/lindy/Vault/audiobook/Fourth Wing')).expanduser().resolve()
 AUDIO_DIR = BOOK_DIR / 'audio'
 TOTAL_CHAPTERS = 39
 
@@ -407,9 +407,17 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run the Fourth Wing industrial pipeline.')
     parser.add_argument(
+        '--book-dir',
+        type=Path,
+        help='Book artifact directory. Overrides FOURTH_WING_BOOK_DIR; never defaults to a deployment repository.',
+    )
+    parser.add_argument(
         '--rebuild-acoustic',
         action='store_true',
         help='Explicitly permit rebuilding existing acoustic artifacts with the current profile.',
     )
     args = parser.parse_args()
+    if args.book_dir:
+        BOOK_DIR = args.book_dir.expanduser().resolve()
+        AUDIO_DIR = BOOK_DIR / 'audio'
     raise SystemExit(run_pipeline(allow_acoustic_rebuild=args.rebuild_acoustic))
