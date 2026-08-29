@@ -38,6 +38,10 @@ ASR_PHRASE_VARIANTS = (
     ("leavingtheriders", "leaving the riders"),
     ("canthrowmeback", "can throw me back"),
     ("tell deigh", "tell deigh"),
+    # Observed edition/ASR renderings in the current Fourth Wing artifacts.
+    ("twenty percent", "20 percent"),
+    ("feathertail", "feather tail"),
+    ("how did training with carr go", "out of training with cargo"),
 )
 
 ASR_TOKEN_VARIANTS = {
@@ -48,6 +52,7 @@ ASR_TOKEN_VARIANTS = {
     "hmph": "hmm", "clyde": "claidh", "athbeen": "athebyne",
     "basgayeth": "basgiath", "orisha": "aretia",
     "rhiannon": "rian", "matthias": "mateus",
+    "kalista": "kallista", "nima": "neema",
 }
 
 # Whole-word audio renderings that cannot be handled safely by a per-word
@@ -57,6 +62,8 @@ ASR_AUDIO_PHRASE_VARIANTS = (
     ("your friends", "you are friends"),
     ("soren gale", "sorrengail"),
     ("myself what", "my self what"),
+    ("almost 20%", "almost 20 percent"),
+    ("107", "a hundred and seven"),
 )
 
 NUMBER_PHRASE_VARIANTS = (
@@ -90,11 +97,22 @@ def tokenize_clean(text):
 def _source_tokens_with_words(text):
     """Return normalized source tokens together with their original-word indexes."""
     raw_words = str(text).split()
-    tokens, word_indexes = [], []
-    for word_index, raw_word in enumerate(raw_words):
-        for token in tokenize_clean(raw_word):
-            tokens.append(token)
-            word_indexes.append(word_index)
+    tokens = tokenize_clean(text)
+    if not tokens:
+        return [], []
+    if len(raw_words) == 1:
+        return tokens, [0] * len(tokens)
+    # Tokenize the complete source string so observed multi-word renderings
+    # such as “twenty percent” -> “20 percent” and “hundred and seven” ->
+    # “107” remain matchable. Map the normalized sequence back to printed
+    # words proportionally; unmapped printed words receive interpolated spans
+    # later in _build_word_spans rather than fabricated audio tokens.
+    if len(tokens) == 1:
+        return tokens, [0]
+    word_indexes = [
+        min(len(raw_words) - 1, round(index * (len(raw_words) - 1) / (len(tokens) - 1)))
+        for index in range(len(tokens))
+    ]
     return tokens, word_indexes
 
 
@@ -174,6 +192,29 @@ def _has_nearby_exact_audio(source_tokens, acoustic_words, ac_tokens, ac_map, ne
         if next_start - window_seconds <= start <= next_start and end <= next_start + 0.2:
             return True
     return False
+
+
+def _duplicate_source_fragment_indices(sentences):
+    """Find extraction fragments whose combined text duplicates one record.
+
+    Some EPUBs expose one paragraph both as a complete sentence and as several
+    child records (for example ``Venin are real`` plus ``Venin``/``Are``/``Real``).
+    The fragments are print-source duplication, not additional narrated prose.
+    """
+    duplicate = set()
+    for anchor_index, anchor in enumerate(sentences):
+        anchor_tokens = tokenize_clean(anchor.get("text", ""))
+        if len(anchor_tokens) < 2:
+            continue
+        for start in range(anchor_index + 1, len(sentences)):
+            combined = []
+            for end in range(start, len(sentences)):
+                combined.extend(tokenize_clean(sentences[end].get("text", "")))
+                if len(combined) >= len(anchor_tokens):
+                    if combined == anchor_tokens and end > start:
+                        duplicate.update(range(start, end + 1))
+                    break
+    return duplicate
 
 
 def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_words, st, et):
@@ -532,6 +573,8 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
 
     # Pass 3: Progressive sequential bounded matching for all remaining sentences
     inferred_non_narrated = set()
+    inferred_duplicate = _duplicate_source_fragment_indices(sentences)
+    inferred_non_narrated.update(inferred_duplicate)
     for s_idx in range(len(sentences)):
         if s_idx in matched_sentences:
             continue
@@ -583,6 +626,31 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 t_left = chosen
                 sub_tokens = ac_tokens[t_left:t_right]
                 candidates = [0]
+        if not candidates:
+            # The acoustic token map can be non-monotonic when Whisper emits a
+            # duplicated word or collapses a numeric utterance. Search the
+            # full sequence, but accept only a candidate physically bounded by
+            # the already validated neighbouring audio spans. This is still a
+            # real acoustic match; it never borrows a previous timestamp.
+            bounded = []
+            lower = None
+            upper = None
+            if previous:
+                lower = float(acoustic_words[previous[-1]].get("end", 0.0)) - 0.5
+            if following:
+                upper = float(acoustic_words[following[0]].get("start", 0.0)) + 0.2
+            for candidate in _exact_candidate_starts(clean_s, ac_tokens):
+                first_word = ac_map[candidate]
+                last_word = ac_map[candidate + len(clean_s) - 1]
+                start = float(acoustic_words[first_word].get("start", 0.0))
+                end = float(acoustic_words[last_word].get("end", 0.0))
+                if (lower is None or start >= lower) and (upper is None or end <= upper):
+                    bounded.append((candidate, start))
+            if bounded:
+                chosen, _ = min(bounded, key=lambda item: item[1])
+                t_left = 0
+                sub_tokens = ac_tokens
+                candidates = [chosen]
         if (
             not candidates
             and len(clean_s) <= 2
@@ -673,7 +741,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
     for s_idx, sentence in enumerate(sentences):
         if _is_non_narrated_text(sentence.get("text", "")):
             continue
-        if s_idx in matched_sentences or len(_source_tokens_with_words(sentence.get("text", ""))[0]) > 2:
+        if s_idx in matched_sentences:
             continue
         previous = [matched_sentences[i]["word_end"] for i in range(s_idx) if i in matched_sentences]
         following = [matched_sentences[i]["word_start"] for i in range(s_idx + 1, len(sentences)) if i in matched_sentences]
@@ -681,6 +749,10 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             _source_tokens_with_words(sentence.get("text", ""))[0],
             acoustic_words, ac_tokens, ac_map, following[0],
         ):
+            # With validated anchors on both sides, a sentence that has no
+            # unique occurrence anywhere in its bounded acoustic window is a
+            # print/audio edition omission. Keep it visible in the reader but
+            # explicitly non-playable; never assign a borrowed timestamp.
             inferred_non_narrated.add(s_idx)
 
     # Build final aligned list preserving printed order. Missing timestamps are
@@ -704,7 +776,10 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 and ms.get("alignment_method") not in {"leading_epigraph_attribution", "chapter_heading_numeric_variant"}
             )
             last_word_start = max(last_word_start, ms["word_start"])
-            non_narrated = _is_non_narrated_text(s.get("text", "")) or s_idx in inferred_non_narrated
+            # A sentence that later receives a real global match is narrated;
+            # only explicit print-only content or a proven duplicate fragment
+            # may remain non-narrated on the matched branch.
+            non_narrated = _is_non_narrated_text(s.get("text", "")) or s_idx in inferred_duplicate
             aligned_results.append({
                 **s,
                 "source_text": s.get("source_text", s.get("text", "")),
@@ -722,8 +797,8 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "match_ratio": ms["match_ratio"],
                 "alignment_method": "opening_speaker_attribution" if opening_speaker else ms["alignment_method"],
                 "fallback_used": False,
-                "alignment_status": "review-required" if non_monotonic else "validated",
-                "alignment_reason": ms.get("alignment_reason") or ("opening_speaker_attribution" if opening_speaker else "global_match_out_of_order" if non_monotonic else None)
+                "alignment_status": "not-applicable" if non_narrated else "review-required" if non_monotonic else "validated",
+                "alignment_reason": "duplicate_source_fragment" if s_idx in inferred_duplicate else ms.get("alignment_reason") or ("opening_speaker_attribution" if opening_speaker else "global_match_out_of_order" if non_monotonic else None)
             })
         else:
             # Sentence without a standalone acoustic match (e.g. a heading or
@@ -750,7 +825,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_status": "not-applicable" if s.get("is_heading") or non_narrated else "review-required",
                 "alignment_reason": "non_narrated_text" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
                 "non_narrated_evidence": {
-                    "basis": "acoustic_window_absence" if s_idx in inferred_non_narrated else "publisher_back_matter" if non_narrated and (
+                    "basis": "duplicate_source_fragment" if s_idx in inferred_duplicate else "acoustic_window_absence" if s_idx in inferred_non_narrated else "publisher_back_matter" if non_narrated and (
                         str(s.get("text", "")).lower().startswith(("the love doesn’t end here", "the love doesn't end here", "join the entangled insiders"))
                     ) else "typographic_pause_marker",
                     "source_text": s.get("text", ""),

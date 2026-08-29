@@ -56,6 +56,21 @@ class ReleaseGateTests(unittest.TestCase):
             report = json.loads((root / "reader_validation_report.json").read_text(encoding="utf-8")) if (root / "reader_validation_report.json").exists() else None
             self.assertIsNone(report)
 
+    def test_low_lexical_ratio_with_complete_physical_spans_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0]["word_spans"] = [
+                {"word": word, "start": float(index), "end": float(index) + 0.2}
+                for index, word in enumerate(("A", "sentence."))
+            ]
+            data[0]["matched_token_count"] = 2
+            data[0]["match_ratio"] = 0.4
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
+
     def test_owner_review_ledger_blocks_release_instead_of_waiving_alignment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
