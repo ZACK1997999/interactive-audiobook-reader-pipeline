@@ -120,10 +120,6 @@ def repair_acoustic_gaps(
     transcribe_fn=None,
 ):
     """Retranscribe bounded failure windows and accept only measurable gains."""
-    if transcribe_fn is None:
-        import mlx_whisper
-        transcribe_fn = mlx_whisper.transcribe
-
     audio_path = Path(audio_path)
     acoustic_path = Path(acoustic_path)
     analysis_path = Path(analysis_path)
@@ -154,6 +150,13 @@ def repair_acoustic_gaps(
     windows = review_windows(aligned_records)
     if not windows:
         return {"status": "not-needed", "windows": [], "review_before": len(_review_ids(aligned_records))}
+
+    # Keep the optional Apple/MLX dependency lazy.  Configuration and artifact
+    # gates above must remain runnable in portable CI environments where
+    # mlx-whisper is intentionally not installed.
+    if transcribe_fn is None:
+        import mlx_whisper
+        transcribe_fn = mlx_whisper.transcribe
 
     # mlx-whisper currently processes the span between the first and last pair
     # when many disjoint clips are supplied together. Invoke each bounded clip
