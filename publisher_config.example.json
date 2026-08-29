@@ -8,6 +8,7 @@
   "archive_html": "/path/to/obsidian/Example_Interactive_Reader.html",
   "portal_repo": "/Users/lindy/Vault/Audible",
   "public_reader_url": "https://zack1997999.github.io/Audible/books/example-book/",
+  "hosting_provider": "cloudflare_pages",
   "manifest_entry": {
     "title": "Example Book",
     "subtitle": "A short subtitle",

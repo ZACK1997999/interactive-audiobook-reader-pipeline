@@ -51,19 +51,47 @@ def inspect(config_path: Path | None = None, book_dir: Path | None = None) -> di
     except (OSError, ValueError) as exc:
         result["checks"].append({"name": "publisher_config", "status": "invalid", "detail": str(exc)})
         return result
-    required = ("book_id", "reader_html", "audio_manifest", "release_report", "portal_repo", "public_reader_url")
+    required = (
+        "book_id", "reader_html", "audio_manifest", "release_report", "intake_plan",
+        "portal_repo", "public_reader_url", "git_branch", "hosting_provider",
+    )
     missing = [key for key in required if not data.get(key)]
     result["checks"].append({"name": "required_fields", "status": "passed" if not missing else "missing", "missing": missing})
     portal = Path(data.get("portal_repo", "")).expanduser().resolve() if data.get("portal_repo") else None
+    path_checks = []
+    for key in ("reader_html", "audio_manifest", "release_report", "intake_plan"):
+        path = Path(data.get(key, "")).expanduser() if data.get(key) else None
+        path_checks.append({"name": key, "status": "passed" if path and path.is_file() else "missing"})
+    result["checks"].extend(path_checks)
     if portal:
         result["checks"].append({"name": "portal_repo", "status": "passed" if (portal / ".git").exists() else "missing", "path": str(portal)})
         result["remote"] = _git(portal, "remote", "get-url", "origin")
         result["branch"] = _git(portal, "branch", "--show-current")
+        expected_branch = data.get("git_branch")
+        result["checks"].append({
+            "name": "target_branch",
+            "status": "passed" if result["branch"] == expected_branch else "mismatch",
+            "expected": expected_branch,
+            "actual": result["branch"],
+        })
         legacy = portal / "scripts" / "deploy_full_chunked_library.py"
         result["deployment_mode"] = "legacy_chunked" if legacy.is_file() else "manifest_publisher"
-        result["checks"].append({"name": "deployment_entrypoint", "status": "passed" if legacy.is_file() or data.get("portal_repo") else "missing"})
+        result["checks"].append({
+            "name": "deployment_entrypoint",
+            "status": "blocked_legacy" if legacy.is_file() else "passed",
+            "path": str(legacy) if legacy.is_file() else None,
+        })
+    result["hosting_provider"] = data.get("hosting_provider")
     result["visibility"] = "unknown_requires_provider_check"
-    result["status"] = "ready" if not missing and portal and (portal / ".git").exists() else "blocked"
+    has_missing_paths = any(item["status"] == "missing" for item in path_checks)
+    branch_ok = bool(result.get("branch") and result.get("branch") == data.get("git_branch"))
+    modern_entrypoint = result.get("deployment_mode") == "manifest_publisher"
+    result["status"] = "ready" if (
+        not missing and not has_missing_paths and portal and (portal / ".git").exists()
+        and branch_ok and modern_entrypoint and data.get("hosting_provider") == "cloudflare_pages"
+    ) else "blocked"
+    if result["status"] == "blocked" and "remediation" not in result:
+        result["remediation"] = "Use the manifest-aware publisher and verify the configured Cloudflare Pages project before publishing."
     return result
 
 
