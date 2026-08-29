@@ -73,6 +73,7 @@ def validate(book_dir: Path, report_path=None):
         )
         review_ledger = {}
     accepted_exceptions = []
+    non_narrated_reviews = []
     manifest_entries = {}
     manifest_path = book_dir / "reader_run_manifest.json"
     if manifest_path.exists():
@@ -195,7 +196,19 @@ def validate(book_dir: Path, report_path=None):
                 and not item.get("fallback_used")
                 and float(item.get("match_ratio", 0.0)) >= 0.5
             )
-            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") == "non_narrated_content"
+            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") in {"non_narrated_content", "non_narrated_text"}
+            if non_narrated:
+                evidence = item.get("non_narrated_evidence") or {}
+                acoustic_path = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+                import hashlib
+                non_narrated_reviews.append({
+                    "chapter": number,
+                    "sentence_id": item_id,
+                    "source_text": item.get("text", ""),
+                    "evidence": evidence,
+                    "acoustic_words_sha256": hashlib.sha256(acoustic_path.read_bytes()).hexdigest() if acoustic_path.exists() else None,
+                    "audio_sha256": hashlib.sha256(audio_resolution.path.read_bytes()).hexdigest() if audio_resolution.status == "ok" else None,
+                })
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
             raw_start = item.get("raw_start", item.get("start"))
@@ -245,7 +258,7 @@ def validate(book_dir: Path, report_path=None):
             record["status"] = "validated"
         chapters.append(record)
 
-    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "accepted_review_exceptions": accepted_exceptions, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
+    result = {"book_dir": str(book_dir.resolve()), "chapters": chapters, "accepted_review_exceptions": accepted_exceptions, "non_narrated_reviews": non_narrated_reviews, "errors": errors, "warnings": warnings, "release_ready": not errors and not warnings}
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output)
     if report_path:

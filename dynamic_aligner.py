@@ -68,8 +68,7 @@ def _exact_candidate_starts(source_tokens, audio_tokens):
 def _is_non_narrated_text(text):
     normalized = " ".join(str(text).lower().split())
     return (
-        normalized in {"* * *", "***"}
-        or re.match(r"^chapter\s+(?:[a-z]+|\d+)\s*$", normalized) is not None
+        normalized in {"* * *", "***", "…", "..."}
         or normalized.startswith("sign up ")
         or normalized.startswith("did you love uncovering ")
     )
@@ -116,7 +115,67 @@ _EPIGRAPH_PREFIXES = (
     ("an", "excerpt", "from"),
     ("quote", "from"),
     ("excerpt", "from"),
+    ("from",),
 )
+
+_CHAPTER_NUMBERS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20, "twenty-one": 21, "twenty-two": 22,
+    "twenty-three": 23, "twenty-four": 24, "twenty-five": 25,
+    "twenty-six": 26, "twenty-seven": 27, "twenty-eight": 28,
+    "twenty-nine": 29, "thirty": 30, "thirty-one": 31, "thirty-two": 32,
+    "thirty-three": 33, "thirty-four": 34, "thirty-five": 35,
+    "thirty-six": 36, "thirty-seven": 37, "thirty-eight": 38,
+    "thirty-nine": 39,
+}
+
+
+def _chapter_heading_matches(sentences, acoustic_words, ac_tokens, ac_map):
+    """Map printed ``CHAPTER TWENTY-ONE`` to spoken ``Chapter 21``."""
+    result = {}
+    for sentence_idx, sentence in enumerate(sentences[:12]):
+        source = str(sentence.get("text", "")).strip().lower()
+        match = re.match(r"^chapter\s+([a-z0-9-]+)$", source)
+        if not match:
+            continue
+        number = _CHAPTER_NUMBERS.get(match.group(1))
+        if number is None:
+            try:
+                number = int(match.group(1))
+            except ValueError:
+                continue
+        number_tokens = {str(number)}
+        if number == 20:
+            number_tokens.add("twenty")
+        candidates = []
+        for i in range(min(160, len(ac_tokens) - 1)):
+            if ac_tokens[i] != "chapter":
+                continue
+            for width in (2, 3):
+                spoken = " ".join(ac_tokens[i + 1:i + width])
+                if spoken in number_tokens or spoken.replace(" ", "-") in number_tokens:
+                    candidates.append((i, i + width - 1))
+        if not candidates:
+            continue
+        token_start, token_end = candidates[0]
+        word_start, word_end = ac_map[token_start], ac_map[token_end]
+        st = float(acoustic_words[word_start]["start"])
+        et = float(acoustic_words[word_end]["end"])
+        result[sentence_idx] = {
+            "start": round(st, 2), "end": round(max(st + 0.3, et), 2),
+            "raw_start": round(st, 2), "raw_end": round(max(st + 0.3, et), 2),
+            "audio_start": round(st, 2), "audio_end": round(max(st + 0.3, et), 2),
+            "audio_order": word_start, "has_audio_match": True,
+            "word_spans": [{"word": w, "start": round(st, 2), "end": round(max(st + 0.3, et), 2)} for w in sentence["text"].split()],
+            "word_start": word_start, "word_end": word_end,
+            "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1.0,
+            "alignment_method": "chapter_heading_numeric_variant",
+            "alignment_reason": "spoken_numeric_heading", "fallback_used": False,
+        }
+    return result
 
 
 def _leading_epigraph_attributions(sentences, acoustic_words, ac_tokens, ac_map):
@@ -215,12 +274,15 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
     # Reserve leading epigraph attributions before the monotonic global pass.
     matched_sentences = _leading_epigraph_attributions(sentences, acoustic_words, ac_tokens, ac_map)
     epigraph_indices = set(matched_sentences)
+    heading_matches = _chapter_heading_matches(sentences, acoustic_words, ac_tokens, ac_map)
+    matched_sentences.update({idx: value for idx, value in heading_matches.items() if idx not in matched_sentences})
+    special_indices = epigraph_indices | set(heading_matches)
     used_tokens = set()
 
     # Reserve globally unique exact sentences before fuzzy clusters run. This
     # prevents a long neighboring cluster from consuming their audio tokens.
     for s_idx, s in enumerate(sentences):
-        if s.get("is_heading") or s_idx in epigraph_indices:
+        if s.get("is_heading") or s_idx in special_indices:
             continue
         clean_s, source_word_indexes = _source_tokens_with_words(s["text"])
         exact_starts = _exact_candidate_starts(clean_s, ac_tokens)
@@ -248,7 +310,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         clean_s, source_word_indexes = _source_tokens_with_words(s["text"])
         if len(clean_s) == 0:
             continue
-        if s.get("is_heading") or s_idx in epigraph_indices:
+        if s.get("is_heading") or s_idx in special_indices:
             matcher = difflib.SequenceMatcher(None, clean_s, ac_tokens[:50], autojunk=False)
             blocks = [b for b in matcher.get_matching_blocks() if b.size > 0]
             if blocks and sum(b.size for b in blocks) >= 1:
@@ -342,7 +404,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             }
 
     # Pass 2: Filter initial anchors with LIS (Longest Increasing Subsequence)
-    sorted_s_idx = sorted(k for k in matched_sentences if k not in epigraph_indices)
+    sorted_s_idx = sorted(k for k in matched_sentences if k not in special_indices)
     if len(sorted_s_idx) > 2:
         w_starts = [matched_sentences[k]["word_start"] for k in sorted_s_idx]
         import bisect
@@ -366,7 +428,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         if len(lis_indices) >= len(sorted_s_idx) * 0.7:
             matched_sentences = {
                 k: v for k, v in matched_sentences.items()
-                if k in lis_indices or k in epigraph_indices
+                if k in lis_indices or k in special_indices
             }
 
     # Pass 3: Progressive sequential bounded matching for all remaining sentences
@@ -476,7 +538,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
         raw_words = s["text"].split()
         if s_idx in matched_sentences:
             ms = matched_sentences[s_idx]
-            non_monotonic = ms["word_start"] < last_word_start and ms.get("alignment_method") != "leading_epigraph_attribution"
+            non_monotonic = ms["word_start"] < last_word_start and ms.get("alignment_method") not in {"leading_epigraph_attribution", "chapter_heading_numeric_variant"}
             last_word_start = max(last_word_start, ms["word_start"])
             non_narrated = _is_non_narrated_text(s.get("text", ""))
             aligned_results.append({
@@ -522,7 +584,12 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_method": "unmatched",
                 "fallback_used": False,
                 "alignment_status": "not-applicable" if s.get("is_heading") or non_narrated else "review-required",
-                "alignment_reason": "non_narrated_content" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match"
+                "alignment_reason": "non_narrated_text" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
+                "non_narrated_evidence": {
+                    "basis": "typographic_pause_marker",
+                    "source_text": s.get("text", ""),
+                    "requires_lexical_audio": False,
+                } if non_narrated else None,
             })
             
     atomic_write_json(aligned_out_path, aligned_results)
