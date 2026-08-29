@@ -160,6 +160,21 @@ def _acoustic_tokens_with_map(acoustic_words):
     return ac_tokens, ac_map
 
 
+def _has_nearby_exact_audio(source_tokens, acoustic_words, ac_tokens, ac_map, next_word_index, window_seconds=5.0):
+    """Check whether a short unmatched sentence is spoken near its next anchor."""
+    if not source_tokens or next_word_index is None:
+        return False
+    next_start = float(acoustic_words[next_word_index]["start"])
+    for candidate in _exact_candidate_starts(source_tokens, ac_tokens):
+        start_word = ac_map[candidate]
+        end_word = ac_map[candidate + len(source_tokens) - 1]
+        start = float(acoustic_words[start_word]["start"])
+        end = float(acoustic_words[end_word]["end"])
+        if next_start - window_seconds <= start <= next_start and end <= next_start + 0.2:
+            return True
+    return False
+
+
 def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_words, st, et):
     """Map source words to matched acoustic words, interpolating only true gaps."""
     mapped_by_word = {index: [] for index in range(len(raw_words))}
@@ -515,6 +530,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             }
 
     # Pass 3: Progressive sequential bounded matching for all remaining sentences
+    inferred_non_narrated = set()
     for s_idx in range(len(sentences)):
         if s_idx in matched_sentences:
             continue
@@ -534,6 +550,8 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
 
         sub_tokens = ac_tokens[t_left:t_right]
         if not sub_tokens:
+            if len(clean_s) <= 2 and previous and following:
+                inferred_non_narrated.add(s_idx)
             continue
 
         candidates = _exact_candidate_starts(clean_s, sub_tokens)
@@ -564,6 +582,14 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 t_left = chosen
                 sub_tokens = ac_tokens[t_left:t_right]
                 candidates = [0]
+        if (
+            not candidates
+            and len(clean_s) <= 2
+            and previous
+            and following
+            and not _has_nearby_exact_audio(clean_s, acoustic_words, ac_tokens, ac_map, following[0])
+        ):
+            inferred_non_narrated.add(s_idx)
         is_unanchored_ambiguous_short = len(clean_s) <= 2 and not previous and not following and len(candidates) > 1
 
         if len(candidates) >= 1 and not is_unanchored_ambiguous_short:
@@ -639,6 +665,23 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                         "fallback_used": False,
                     }
             
+    # Final conservative classification for short omissions. This runs after
+    # all anchors are known, so it can distinguish a genuinely absent token
+    # (e.g. an omitted interjection) from a spoken attribution absorbed by a
+    # neighbouring sentence.
+    for s_idx, sentence in enumerate(sentences):
+        if _is_non_narrated_text(sentence.get("text", "")):
+            continue
+        if s_idx in matched_sentences or len(_source_tokens_with_words(sentence.get("text", ""))[0]) > 2:
+            continue
+        previous = [matched_sentences[i]["word_end"] for i in range(s_idx) if i in matched_sentences]
+        following = [matched_sentences[i]["word_start"] for i in range(s_idx + 1, len(sentences)) if i in matched_sentences]
+        if previous and following and not _has_nearby_exact_audio(
+            _source_tokens_with_words(sentence.get("text", ""))[0],
+            acoustic_words, ac_tokens, ac_map, following[0],
+        ):
+            inferred_non_narrated.add(s_idx)
+
     # Build final aligned list preserving printed order. Missing timestamps are
     # explicit; never borrow the previous sentence's time.
     aligned_results = []
@@ -660,7 +703,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 and ms.get("alignment_method") not in {"leading_epigraph_attribution", "chapter_heading_numeric_variant"}
             )
             last_word_start = max(last_word_start, ms["word_start"])
-            non_narrated = _is_non_narrated_text(s.get("text", ""))
+            non_narrated = _is_non_narrated_text(s.get("text", "")) or s_idx in inferred_non_narrated
             aligned_results.append({
                 **s,
                 "source_text": s.get("source_text", s.get("text", "")),
@@ -685,7 +728,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             # Sentence without a standalone acoustic match (e.g. a heading or
             # a failed attribution). Do not invent a playable timestamp.
             word_spans = [{"word": rw, "start": None, "end": None} for rw in raw_words]
-            non_narrated = _is_non_narrated_text(s.get("text", ""))
+            non_narrated = _is_non_narrated_text(s.get("text", "")) or s_idx in inferred_non_narrated
             aligned_results.append({
                 **s,
                 "source_text": s.get("source_text", s.get("text", "")),
@@ -706,7 +749,7 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_status": "not-applicable" if s.get("is_heading") or non_narrated else "review-required",
                 "alignment_reason": "non_narrated_text" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
                 "non_narrated_evidence": {
-                    "basis": "publisher_back_matter" if non_narrated and (
+                    "basis": "acoustic_window_absence" if s_idx in inferred_non_narrated else "publisher_back_matter" if non_narrated and (
                         str(s.get("text", "")).lower().startswith(("the love doesn’t end here", "the love doesn't end here", "join the entangled insiders"))
                     ) else "typographic_pause_marker",
                     "source_text": s.get("text", ""),
