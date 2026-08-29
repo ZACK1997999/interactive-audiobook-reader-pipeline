@@ -19,7 +19,7 @@ class DeploymentPreflightTests(unittest.TestCase):
             for name in ("reader.html", "audio.json", "report.json", "intake.json"):
                 (root / name).write_text("{}")
             config = root / "publisher_config.json"
-            config.write_text(json.dumps({"book_id":"demo","reader_html":str(root/"reader.html"),"audio_manifest":str(root/"audio.json"),"release_report":str(root/"report.json"),"intake_plan":str(root/"intake.json"),"portal_repo":str(portal),"public_reader_url":"https://example.test","git_branch":"main","hosting_provider":"cloudflare_pages"}))
+            config.write_text(json.dumps({"book_id":"demo","reader_html":str(root/"reader.html"),"audio_manifest":str(root/"audio.json"),"release_report":str(root/"report.json"),"intake_plan":str(root/"intake.json"),"portal_repo":str(portal),"public_reader_url":"https://example.test","git_branch":"main","hosting_provider":"cloudflare_pages","cloudflare_project":"demo","deployment_mode":"legacy_chunked"}))
             result = inspect(config)
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(result["deployment_mode"], "legacy_chunked")

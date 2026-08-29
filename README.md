@@ -88,10 +88,11 @@ The preflight is fail-closed. It checks the actual portal repository, deployment
 entrypoint, branch, required release inputs, and reports when repository visibility
 must be checked in GitHub/Cloudflare. It does not upload, push, or publish anything.
 
-Publish aligned readers to Cloudflare R2 and update the library catalog:
+Publish aligned readers through the single release entry point:
 
 ```bash
-reader-publish /path/to/publisher_config.json
+reader-release /path/to/publisher_config.json --dry-run
+reader-release /path/to/publisher_config.json
 ```
 
 See [`publisher_config.example.json`](publisher_config.example.json) for the configuration schema.
@@ -112,9 +113,11 @@ quality gate -> semantic gate -> HTML smoke check -> deployment preflight
 -> public URL and audio range verification
 ```
 
-Never run the legacy all-books script as an implicit post-processing step. Select
-one book, one source HTML, one portal branch, and record the resulting commit and
-public URL in the release journal.
+`reader-publish` remains available as a lower-level compatibility command, but it
+must not be called directly for a production release. Never run the legacy
+all-books script as an implicit post-processing step. Select one book, one source
+HTML, one portal branch, and record the resulting commit and public URL in the
+release journal.
 
 ---
 

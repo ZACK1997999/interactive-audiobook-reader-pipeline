@@ -12,16 +12,17 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
-def _git(path: Path, *args: str) -> str | None:
+def _git(path: Path, *args: str) -> Optional[str]:
     try:
         return subprocess.check_output(["git", *args], cwd=path, text=True, stderr=subprocess.DEVNULL).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
 
 
-def discover_config(explicit: str | None = None, book_dir: Path | None = None) -> Path | None:
+def discover_config(explicit: Optional[str] = None, book_dir: Optional[Path] = None) -> Optional[Path]:
     candidates = []
     if explicit:
         candidates.append(Path(explicit).expanduser())
@@ -38,7 +39,7 @@ def discover_config(explicit: str | None = None, book_dir: Path | None = None) -
     return None
 
 
-def inspect(config_path: Path | None = None, book_dir: Path | None = None) -> dict:
+def inspect(config_path: Optional[Path] = None, book_dir: Optional[Path] = None) -> dict:
     result = {"status": "blocked", "config": None, "checks": [], "deployment_mode": None}
     config = discover_config(str(config_path) if config_path else None, book_dir)
     if config is None:
@@ -82,13 +83,17 @@ def inspect(config_path: Path | None = None, book_dir: Path | None = None) -> di
             "path": str(legacy) if legacy.is_file() else None,
         })
     result["hosting_provider"] = data.get("hosting_provider")
+    result["cloudflare_project"] = data.get("cloudflare_project")
     result["visibility"] = "unknown_requires_provider_check"
     has_missing_paths = any(item["status"] == "missing" for item in path_checks)
     branch_ok = bool(result.get("branch") and result.get("branch") == data.get("git_branch"))
-    modern_entrypoint = result.get("deployment_mode") == "manifest_publisher"
+    configured_mode = data.get("deployment_mode", "manifest_publisher")
+    modern_entrypoint = configured_mode == "manifest_publisher"
+    result["deployment_mode"] = configured_mode
     result["status"] = "ready" if (
         not missing and not has_missing_paths and portal and (portal / ".git").exists()
         and branch_ok and modern_entrypoint and data.get("hosting_provider") == "cloudflare_pages"
+        and bool(data.get("cloudflare_project"))
     ) else "blocked"
     if result["status"] == "blocked" and "remediation" not in result:
         result["remediation"] = "Use the manifest-aware publisher and verify the configured Cloudflare Pages project before publishing."

@@ -9,6 +9,8 @@
   "portal_repo": "/Users/lindy/Vault/Audible",
   "public_reader_url": "https://zack1997999.github.io/Audible/books/example-book/",
   "hosting_provider": "cloudflare_pages",
+  "cloudflare_project": "example-reader-production",
+  "deployment_mode": "manifest_publisher",
   "manifest_entry": {
     "title": "Example Book",
     "subtitle": "A short subtitle",
