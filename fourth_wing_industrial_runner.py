@@ -82,7 +82,10 @@ def run_acoustic_loop():
         audio_file = AUDIO_DIR / f'chapter_{ch:02d}.mp3'
         acoustic_out = AUDIO_DIR / f'{prefix}_acoustic_words.json'
 
-        if _is_acoustic_ready(acoustic_out):
+        # A non-empty legacy artifact is not safe input for a new run.  The
+        # acoustic profile is part of the reproducibility contract: if it is
+        # stale, regenerate it before alignment or bounded repair.
+        if _is_acoustic_ready(acoustic_out, require_current_profile=True):
             print(f'[Acoustic] Chapter {ch:02d} already complete: {acoustic_out.name}', flush=True)
             continue
 
@@ -141,7 +144,7 @@ def run_alignment_check(ch: int) -> bool:
 
     if not _is_analysis_ready(analysis_path, canonical_path):
         return False
-    if not _is_acoustic_ready(acoustic_path):
+    if not _is_acoustic_ready(acoustic_path, require_current_profile=True):
         return False
 
     needs_align = not aligned_path.is_file()

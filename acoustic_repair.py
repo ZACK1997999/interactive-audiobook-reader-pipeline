@@ -130,6 +130,16 @@ def repair_acoustic_gaps(
     aligned_path = Path(aligned_path)
     acoustic_data = json.loads(acoustic_path.read_text(encoding="utf-8"))
     aligned_records = json.loads(aligned_path.read_text(encoding="utf-8"))
+    # Repairs are only valid on artifacts produced by the active acoustic
+    # profile.  Applying a local patch to a legacy transcript would preserve
+    # an unverified full-chapter failure outside the patch window.
+    if acoustic_data.get("acoustic_profile_version") != ACOUSTIC_PROFILE_VERSION:
+        return {
+            "status": "stale-acoustic-profile",
+            "windows": [],
+            "review_before": len(_review_ids(aligned_records)),
+            "required_profile_version": ACOUSTIC_PROFILE_VERSION,
+        }
     current_review_ids = _review_ids(aligned_records)
     prior_repair = acoustic_data.get("bounded_repair") or {}
     if (
