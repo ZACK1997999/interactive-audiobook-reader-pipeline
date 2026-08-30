@@ -42,19 +42,20 @@ class AcousticWord:
 @dataclass
 class WordSpan:
     word: str
-    start: float
-    end: float
+    start: Optional[float]
+    end: Optional[float]
     source_word_index: Optional[int] = None
     acoustic_word_start: Optional[int] = None
     acoustic_word_end: Optional[int] = None
+    timing_source: str = "observed"
 
 
 @dataclass
 class AlignmentRecord:
     sentence_id: str
     source_text: str
-    start: float
-    end: float
+    start: Optional[float]
+    end: Optional[float]
     word_spans: List[WordSpan] = field(default_factory=list)
     raw_start: Optional[float] = None
     raw_end: Optional[float] = None

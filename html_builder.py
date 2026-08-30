@@ -810,21 +810,25 @@ body {{
             is_h = s.get("is_heading", False)
             start = s.get("audio_start", s.get("start"))
             end = s.get("audio_end", s.get("end"))
-            has_match = 1 if s.get("has_audio_match", True) and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else 0
+            word_spans = s.get("word_spans", [])
+            # Estimated words are useful diagnostic evidence but must never
+            # turn a paraphrase into a clickable karaoke sentence.
+            spans_are_observed = all(w.get("timing_source", "observed") == "observed" for w in word_spans)
+            has_match = 1 if s.get("has_audio_match", True) and spans_are_observed and isinstance(start, (int, float)) and isinstance(end, (int, float)) and end > start else 0
             start_arg = "null" if start is None else str(start)
             end_arg = "null" if end is None else str(end)
             trans = html.escape(s.get("trans", ""))
             vocab = s.get("vocab", [])
             raw_text = s.get("text", "")
             
-            word_spans = s.get("word_spans", [])
             word_html_list = []
             if word_spans:
                 for w in word_spans:
                     rw = html.escape(w["word"])
                     ws = w["start"]
                     we = w["end"]
-                    word_html_list.append(f'<span class="w" data-s="{ws}" data-e="{we}">{rw}</span>')
+                    timing_source = html.escape(w.get("timing_source", "observed"))
+                    word_html_list.append(f'<span class="w" data-s="{ws}" data-e="{we}" data-timing-source="{timing_source}">{rw}</span>')
             else:
                 for rw in s["text"].split():
                     word_html_list.append(f'<span class="w" data-s="{start_arg}" data-e="{end_arg}">{html.escape(rw)}</span>')

@@ -249,7 +249,12 @@ def _build_word_spans(raw_words, source_word_indexes, source_to_audio, acoustic_
             else:
                 ws = st + (et - st) * (word_index / max(1, len(raw_words)))
                 we = st + (et - st) * ((word_index + 1) / max(1, len(raw_words)))
-        spans.append({"word": raw_word, "start": round(ws, 2), "end": round(max(ws, we), 2)})
+        spans.append({
+            "word": raw_word,
+            "start": round(ws, 2),
+            "end": round(max(ws, we), 2),
+            "timing_source": "observed" if word_index in mapped_word_ranges else "estimated",
+        })
     return spans
 
 
@@ -806,7 +811,10 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
             # Sentence without a standalone acoustic match (e.g. a heading or
             # a failed attribution). Do not invent a playable timestamp.
             word_spans = [{"word": rw, "start": None, "end": None} for rw in raw_words]
-            non_narrated = _is_non_narrated_text(s.get("text", "")) or s_idx in inferred_non_narrated
+            structural_non_narrated = _is_non_narrated_text(s.get("text", ""))
+            proven_duplicate = s_idx in inferred_duplicate
+            audio_omitted = s_idx in inferred_non_narrated and not proven_duplicate
+            non_narrated = structural_non_narrated or proven_duplicate
             aligned_results.append({
                 **s,
                 "source_text": s.get("source_text", s.get("text", "")),
@@ -825,9 +833,9 @@ def align_sentences_with_audio(acoustic_json_path, analysis_json_path, aligned_o
                 "alignment_method": "unmatched",
                 "fallback_used": False,
                 "alignment_status": "not-applicable" if s.get("is_heading") or non_narrated else "review-required",
-                "alignment_reason": "non_narrated_text" if non_narrated else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
+                "alignment_reason": "non_narrated_text" if non_narrated else "audio_omitted" if audio_omitted else "ambiguous_short_sentence" if len(tokenize_clean(s.get("text", ""))) <= 2 else "no_sufficient_global_match",
                 "non_narrated_evidence": {
-                    "basis": "duplicate_source_fragment" if s_idx in inferred_duplicate else "acoustic_window_absence" if s_idx in inferred_non_narrated else "publisher_back_matter" if non_narrated and (
+                    "basis": "duplicate_source_fragment" if s_idx in inferred_duplicate else "publisher_back_matter" if non_narrated and (
                         str(s.get("text", "")).lower().startswith(("the love doesn’t end here", "the love doesn't end here", "join the entangled insiders"))
                     ) else "typographic_pause_marker",
                     "source_text": s.get("text", ""),

@@ -29,6 +29,7 @@ py-modules = [
   "audio_resolver",
   "alignment_backend",
   "contract_adapters",
+  "content_profile",
   "chapter_resolver",
   "chapter_locator",
   "chapter_metadata",

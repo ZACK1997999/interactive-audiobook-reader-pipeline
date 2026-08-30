@@ -30,15 +30,16 @@ class PipelineSafetyTests(unittest.TestCase):
             aligned = [{**analysis[0], "word_spans": [{"word": "A", "start": 0, "end": 1}], "raw_start": 0, "raw_end": 1, "has_audio_match": True, "fallback_used": False, "alignment_status": "validated", "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1}]
             for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
                 (root / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            audio_sha = __import__('hashlib').sha256((root / "audio" / "chapter_01.mp3").read_bytes()).hexdigest()
             (root / "audio" / "book_ch01_acoustic_words.json").write_text(
-                json.dumps({"words": [
+                json.dumps({"acoustic_profile_version": __import__('acoustic_whisper').ACOUSTIC_PROFILE_VERSION, "source_audio_sha256": audio_sha, "words": [
                     {"word": "A", "start": 0, "end": 1},
                     {"word": "sentence", "start": 1, "end": 2},
                     *[{"word": f"filler{i}", "start": 2 + i, "end": 3 + i} for i in range(80)],
                 ]}), encoding="utf-8"
             )
             from artifact_io import atomic_write_json
-            audio_manifest = {"entries": [{"chapter": 1, "source_path": str(root / "audio" / "chapter_01.mp3"), "source_sha256": __import__('hashlib').sha256((root / "audio" / "chapter_01.mp3").read_bytes()).hexdigest(), "bytes": 7, "public_url": "https://cdn.example/book/chapter_01.mp3"}]}
+            audio_manifest = {"entries": [{"chapter": 1, "source_path": str(root / "audio" / "chapter_01.mp3"), "source_sha256": audio_sha, "bytes": 7, "public_url": "https://cdn.example/book/chapter_01.mp3"}]}
             atomic_write_json(root / "audio_manifest.json", audio_manifest)
             ready, output = auto_discover_and_build(root, book_title="Book", book_author="Author")
             self.assertEqual(ready, 1)

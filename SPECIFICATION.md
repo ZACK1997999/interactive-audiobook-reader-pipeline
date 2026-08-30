@@ -1,7 +1,7 @@
 # Industrial Interactive Audiobook Reader Specification & Architecture (v3.0)
 
 ## 1. System Overview
-The **Interactive Audiobook Reader Pipeline** is a fully automated, Apple Books-grade bilingual reading and listening system. It transforms raw book text (EPUB/Markdown) and unabridged audiobooks (MP3) into synchronized standalone web applications with sub-second karaoke word tracking, collapsible sentence-by-sentence Machiavellian/philosophical translations, and B2+/C1/C2 vocabulary breakdowns.
+The **Interactive Audiobook Reader Pipeline** is a fully automated, Apple Books-grade bilingual reading and listening system. It transforms raw book text (EPUB/Markdown) and complete audiobooks (MP3) into synchronized standalone web applications with sub-second karaoke word tracking, collapsible sentence-by-sentence Machiavellian/philosophical translations, and B2+/C1/C2 vocabulary breakdowns. Abridged and course audio require a declared, hash-bound audio-content profile and a separately supplied spoken source; they are never inferred from duration.
 
 ---
 
