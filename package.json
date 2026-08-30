@@ -1,0 +1,24 @@
+{
+  "name": "interactive-audiobook-reader-pipeline",
+  "version": "1.0.0",
+  "description": "A deterministic, industrial toolchain for transforming EPUB chapters and audiobook audio into an Apple Books-grade standalone interactive reading experience with word-level forced alignment, bilingual vocabulary breakdown, and zero-dependency publication.",
+  "main": "index.js",
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZACK1997999/interactive-audiobook-reader-pipeline.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ZACK1997999/interactive-audiobook-reader-pipeline/issues"
+  },
+  "homepage": "https://github.com/ZACK1997999/interactive-audiobook-reader-pipeline#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}
