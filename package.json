@@ -4,7 +4,8 @@
   "description": "A deterministic, industrial toolchain for transforming EPUB chapters and audiobook audio into an Apple Books-grade standalone interactive reading experience with word-level forced alignment, bilingual vocabulary breakdown, and zero-dependency publication.",
   "main": "index.js",
   "scripts": {
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:browser:reader": "playwright test reader_runtime"
   },
   "repository": {
     "type": "git",
