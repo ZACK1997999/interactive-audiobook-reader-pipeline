@@ -1,3 +1,5 @@
 node_modules/
 .runs/
 outputs/
+test-results/
+playwright-report/
