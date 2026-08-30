@@ -63,15 +63,16 @@ def alignment_records_from_json(items: Iterable[Dict[str, Any]]) -> List[Alignme
             AlignmentRecord(
                 sentence_id=item["id"],
                 source_text=item.get("source_text", item.get("text", "")),
-                start=float(item.get("start", 0.0)),
-                end=float(item.get("end", 0.0)),
+                start=float(item["start"]) if isinstance(item.get("start"), (int, float)) else None,
+                end=float(item["end"]) if isinstance(item.get("end"), (int, float)) else None,
                 raw_start=item.get("raw_start"),
                 raw_end=item.get("raw_end"),
                 word_spans=[
                     WordSpan(
                         word=span["word"],
-                        start=float(span["start"]),
-                        end=float(span["end"]),
+                        start=float(span["start"]) if isinstance(span.get("start"), (int, float)) else None,
+                        end=float(span["end"]) if isinstance(span.get("end"), (int, float)) else None,
+                        timing_source=span.get("timing_source", "observed"),
                     )
                     for span in item.get("word_spans", [])
                 ],
@@ -100,7 +101,7 @@ def alignment_record_to_json(record: AlignmentRecord, *, text: str = None) -> Di
         "raw_end": record.raw_end,
         "has_audio_match": record.has_audio_match,
         "word_spans": [
-            {"word": span.word, "start": span.start, "end": span.end}
+            {"word": span.word, "start": span.start, "end": span.end, "timing_source": span.timing_source}
             for span in record.word_spans
         ],
         "matched_token_count": record.matched_token_count,

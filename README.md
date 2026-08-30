@@ -2,6 +2,8 @@
 
 A deterministic, industrial toolchain for transforming EPUB chapters and audiobook audio into an Apple Books-grade standalone interactive reading experience with word-level forced alignment, bilingual vocabulary breakdown, and zero-dependency publication.
 
+Complete audiobooks are the default product. Abridged and course audio must use a hash-bound `audio_content_profile.json` with an explicit spoken source and sentence-to-audio intervals; inferred omissions cannot pass release.
+
 ---
 
 ## Key Capabilities
