@@ -254,7 +254,10 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
         manifest_entry = manifest_entries.get(number, {})
         if require_provenance:
-            acoustic = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+            # The resolver's canonical acoustic location is derived from the
+            # canonical sentence filename, not from a legacy book prefix.
+            prefix = canonical.name.removesuffix("_canonical_sentences.json")
+            acoustic = book_dir / "audio" / f"{prefix}_acoustic_words.json"
             expected = {
                 "canonical_sha256": _sha256(canonical),
                 "analysis_sha256": _sha256(analysis) if analysis.exists() else None,
