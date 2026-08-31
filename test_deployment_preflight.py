@@ -7,6 +7,10 @@ from deployment_preflight import inspect
 
 
 class DeploymentPreflightTests(unittest.TestCase):
+    def test_real_publisher_config_is_gitignored(self):
+        gitignore = Path(__file__).with_name(".gitignore").read_text(encoding="utf-8")
+        self.assertIn("publisher_config.json", gitignore)
+
     def test_missing_config_is_fail_closed(self):
         with tempfile.TemporaryDirectory() as d:
             result = inspect(book_dir=Path(d))

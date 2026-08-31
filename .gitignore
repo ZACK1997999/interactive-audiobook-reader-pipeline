@@ -3,3 +3,4 @@ node_modules/
 outputs/
 test-results/
 playwright-report/
+publisher_config.json
