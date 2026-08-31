@@ -11,6 +11,7 @@ from audio_resolver import resolve_chapter_audio
 from acoustic_whisper import ACOUSTIC_PROFILE_VERSION
 from artifact_io import atomic_write_json
 from release_token import issue_release_token
+from content_profile import COMPLETE, load_content_profile
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 ABBREVIATION_BEFORE_CAPITAL = re.compile(
@@ -116,7 +117,7 @@ def _has_complete_physical_spans(item: dict) -> bool:
         end = span.get("end")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
             return False
-        if start < 0 or end < start:
+        if start < 0 or end < start or span.get("timing_source", "observed") != "observed":
             return False
     printed_words = str(item.get("text", "")).split()
     expected_words = len(printed_words) if printed_words else int(item.get("source_token_count", 0))
@@ -161,6 +162,8 @@ def _load_review_ledger(book_dir: Path, errors: list[str]) -> dict[tuple[int, st
 def validate(book_dir: Path, report_path=None, *, require_provenance=False):
     errors, warnings, diagnostics, chapters = [], [], [], []
     review_ledger = _load_review_ledger(book_dir, errors)
+    content_profile = load_content_profile(book_dir, errors)
+    content_mode = content_profile["audio_content_mode"]
     if review_ledger:
         errors.append(
             "reader_review_ledger.json contains alignment exceptions; release is blocked "
@@ -236,8 +239,12 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
                 record["analysis_records"] = len(analysis_data)
             except Exception as exc:
                 errors.append(f"{analysis.name}: invalid JSON ({exc})")
-        if number is not None:
-            audio_resolution = resolve_chapter_audio(book_dir / "audio", number)
+        chapter_units = content_profile["units_by_chapter"].get(number, [])
+        scoped_ids = {sentence_id for unit in chapter_units for sentence_id in unit["sentence_ids"]}
+        audio_resolution = resolve_chapter_audio(book_dir / "audio", number) if number is not None else None
+        if number is not None and content_mode != COMPLETE and not chapter_units:
+            errors.append(f"{label}: non-complete profile has no declared audio units")
+        if number is not None and content_mode == COMPLETE:
             if audio_resolution.status == "missing":
                 errors.append(f"{label}: chapter audio file missing")
             elif audio_resolution.status == "ambiguous":
@@ -247,7 +254,10 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
         aligned = book_dir / canonical.name.replace("_canonical_sentences.json", "_aligned_sentences.json")
         manifest_entry = manifest_entries.get(number, {})
         if require_provenance:
-            acoustic = book_dir / "audio" / f"fourth_wing_ch{number:02d}_acoustic_words.json"
+            # The resolver's canonical acoustic location is derived from the
+            # canonical sentence filename, not from a legacy book prefix.
+            prefix = canonical.name.removesuffix("_canonical_sentences.json")
+            acoustic = book_dir / "audio" / f"{prefix}_acoustic_words.json"
             expected = {
                 "canonical_sha256": _sha256(canonical),
                 "analysis_sha256": _sha256(analysis) if analysis.exists() else None,
@@ -314,7 +324,26 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
                 and not item.get("fallback_used")
                 and float(item.get("match_ratio", 0.0)) >= 0.5
             )
-            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") in {"non_narrated_content", "non_narrated_text", "duplicate_source_fragment"}
+            non_narrated = item.get("alignment_status") == "not-applicable" and item.get("alignment_reason") in {"non_narrated_content", "non_narrated_text", "duplicate_source_fragment", "out_of_scope_reference"}
+            out_of_scope = item.get("alignment_reason") == "out_of_scope_reference"
+            if content_mode != COMPLETE and not is_heading:
+                if item_id in scoped_ids and out_of_scope:
+                    errors.append(f"{label} {item_id}: declared playable sentence is marked out of scope")
+                if item_id not in scoped_ids and not out_of_scope:
+                    errors.append(f"{label} {item_id}: non-complete profile requires explicit out_of_scope_reference")
+                if out_of_scope and (item.get("has_audio_match") or item.get("word_spans")):
+                    errors.append(f"{label} {item_id}: out_of_scope_reference must not contain playable spans")
+                if item_id in scoped_ids:
+                    raw_start = item.get("raw_start", item.get("start"))
+                    raw_end = item.get("raw_end", item.get("end"))
+                    in_declared_interval = isinstance(raw_start, (int, float)) and isinstance(raw_end, (int, float)) and any(
+                        raw_start >= unit["audio_start"] and raw_end <= unit["audio_end"]
+                        for unit in chapter_units if item_id in unit["sentence_ids"]
+                    )
+                    if not in_declared_interval:
+                        errors.append(f"{label} {item_id}: aligned interval is outside its declared audio unit")
+            if item.get("alignment_reason") == "audio_omitted":
+                errors.append(f"{label} {item_id}: audio omission cannot be silently excluded")
             structural_audio_reorder = (
                 item.get("alignment_status") == "validated"
                 and item.get("alignment_method") in {
@@ -335,7 +364,7 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
                     "source_text": item.get("text", ""),
                     "evidence": evidence,
                     "acoustic_words_sha256": hashlib.sha256(acoustic_path.read_bytes()).hexdigest() if acoustic_path.exists() else None,
-                    "audio_sha256": hashlib.sha256(audio_resolution.path.read_bytes()).hexdigest() if audio_resolution.status == "ok" else None,
+                    "audio_sha256": hashlib.sha256(audio_resolution.path.read_bytes()).hexdigest() if audio_resolution and audio_resolution.status == "ok" else None,
                 })
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("word_spans") or not item.get("has_audio_match", True)):
                 errors.append(f"{label} {item_id}: missing audio word spans")
@@ -359,7 +388,7 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
                 span_end_raw = span.get("end")
                 span_start = float(span_start_raw) if isinstance(span_start_raw, (int, float)) else None
                 span_end = float(span_end_raw) if isinstance(span_end_raw, (int, float)) else None
-                if span_start is None or span_end is None or span_start < 0 or span_end < span_start:
+                if span_start is None or span_end is None or span_start < 0 or span_end < span_start or span.get("timing_source", "observed") != "observed":
                     errors.append(f"{label} {item_id}: invalid word span")
             if participates_in_timeline:
                 if start is not None:
@@ -373,6 +402,10 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
             physically_playable = _has_complete_physical_spans(item)
             if not is_heading and not non_narrated and not owner_accepted and (not item.get("has_audio_match", True) or item.get("fallback_used") or item.get("alignment_status") not in {"validated", "reviewed"} or matched < 1 or (ratio < 0.5 and not physically_playable)):
                 review_ids.append(item_id)
+        if content_mode != COMPLETE:
+            unknown_scope_ids = scoped_ids - set(ids)
+            if unknown_scope_ids:
+                errors.append(f"{label}: profile references unknown sentence IDs ({', '.join(sorted(unknown_scope_ids)[:8])})")
         record["review_required_records"] = len(review_ids)
         coverage = covered_tokens / expected_tokens if expected_tokens else 1.0
         record["acoustic_coverage"] = coverage
@@ -392,6 +425,8 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
 
     result = {
         "book_dir": str(book_dir.resolve()),
+        "audio_content_mode": content_mode,
+        "audio_content_profile_sha256": content_profile["profile_sha256"],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "pipeline_revision": (json.loads((book_dir / "reader_run_manifest.json").read_text(encoding="utf-8")).get("pipeline_revision") if require_provenance and (book_dir / "reader_run_manifest.json").exists() else None),
         "chapters": chapters,

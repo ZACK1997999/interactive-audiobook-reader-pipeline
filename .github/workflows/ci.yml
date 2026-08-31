@@ -47,3 +47,15 @@ jobs:
 
       - name: Run regression suite
         run: python -m unittest discover -v
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Run Chromium reader gate
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npm run test:browser:reader

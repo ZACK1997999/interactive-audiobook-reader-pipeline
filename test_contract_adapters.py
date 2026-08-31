@@ -49,6 +49,17 @@ class ContractAdapterTests(unittest.TestCase):
             self.assertEqual(records[0].alignment_status, "validated")
             self.assertTrue(output.exists())
 
+    def test_unmatched_records_preserve_null_timestamps(self):
+        records = alignment_records_from_json([{
+            "id": "s-omitted", "text": "Reference-only text.", "start": None, "end": None,
+            "word_spans": [{"word": "Reference-only", "start": None, "end": None}],
+            "has_audio_match": False, "alignment_status": "not-applicable",
+            "alignment_reason": "out_of_scope_reference",
+        }])
+        self.assertIsNone(records[0].start)
+        self.assertIsNone(records[0].word_spans[0].end)
+        self.assertEqual(records[0].word_spans[0].timing_source, "observed")
+
 
 if __name__ == "__main__":
     unittest.main()

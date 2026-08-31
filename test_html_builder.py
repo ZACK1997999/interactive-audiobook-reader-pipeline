@@ -87,6 +87,22 @@ class HTMLBuilderTests(unittest.TestCase):
             self.assertIn('INTRODUCTION<br>How This Book Began', rendered)
             self.assertNotIn('Chapter 1</span>', rendered)
 
+    def test_estimated_word_timing_is_rendered_non_playable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_path = Path(temp_dir)
+            token, report_path = _make_release_token(tmp_path)
+            aligned_path = tmp_path / "book_ch01_aligned_sentences.json"
+            aligned = json.loads(aligned_path.read_text(encoding="utf-8"))
+            aligned[0]["word_spans"] = [{"word": "A", "start": 0, "end": .2, "timing_source": "estimated"}]
+            aligned_path.write_text(json.dumps(aligned), encoding="utf-8")
+            output = tmp_path / "reader.html"
+            build_master_reader("Test", "Study", "Author", [{
+                "num": 1, "title": "Chapter One", "audio": "./audio/chapter_01.mp3", "aligned_json": str(aligned_path),
+            }], str(output), release_token=token, release_report_path=report_path)
+            rendered = output.read_text(encoding="utf-8")
+            self.assertIn('data-matched="0"', rendered)
+            self.assertIn('data-timing-source="estimated"', rendered)
+
     def test_internal_track_number_can_differ_from_display_chapter_number(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             tmp_path = Path(temp_dir)

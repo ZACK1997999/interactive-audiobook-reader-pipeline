@@ -28,6 +28,7 @@ from run_manifest import update_manifest
 from quality_gate import smoke_check_html
 from artifact_io import atomic_write_json
 from chapter_metadata import load_chapter_metadata
+from content_profile import COMPLETE, load_content_profile
 
 
 @contextlib.contextmanager
@@ -178,13 +179,24 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
             expected_chapters=[artifact.chapter_number for artifact in chapter_artifacts],
         )
 
+    profile_errors = []
+    content_profile = load_content_profile(Path(book_dir), profile_errors)
+    if profile_errors:
+        raise RuntimeError("Invalid audio content profile: " + "; ".join(profile_errors))
     audio_manifest = _load_audio_manifest(book_dir)
     discovered_audio = {}
     if audio_manifest is None:
-        for artifact in chapter_artifacts:
-            candidate = _find_chapter_audio(audio_dir, artifact.chapter_number)
-            if candidate:
-                discovered_audio[artifact.chapter_number] = candidate
+        if content_profile["audio_content_mode"] != COMPLETE:
+            for artifact in chapter_artifacts:
+                units = content_profile["units_by_chapter"].get(artifact.chapter_number, [])
+                tracks = {str((Path(book_dir) / unit["audio_path"]).resolve()) for unit in units}
+                if len(tracks) == 1:
+                    discovered_audio[artifact.chapter_number] = tracks.pop()
+        else:
+            for artifact in chapter_artifacts:
+                candidate = _find_chapter_audio(audio_dir, artifact.chapter_number)
+                if candidate:
+                    discovered_audio[artifact.chapter_number] = candidate
         if len(discovered_audio) != len(chapter_artifacts):
             raise RuntimeError("Create audio_manifest.json or resolve every chapter to exactly one audio file")
         audio_manifest = _write_audio_manifest(book_dir, discovered_audio, public_audio_base_url, public_book_id)
@@ -307,7 +319,7 @@ def _auto_discover_and_build(book_dir, book_title=None, book_subtitle="Bilingual
         return 0, master_html_path
     if aligned_configs:
         report_path = os.path.join(book_dir, "reader_validation_report.json")
-        report, release_token = validate_for_release(Path(book_dir), Path(report_path))
+        report, release_token = validate_for_release(Path(book_dir), Path(report_path), require_provenance=True)
         if release_token is None:
             update_manifest(book_dir, manifest_chapters, status="blocked", input_files=input_files)
             print(f"Release blocked. See {report_path}")

@@ -71,6 +71,62 @@ class ReleaseGateTests(unittest.TestCase):
             aligned.write_text(json.dumps(data), encoding="utf-8")
             self.assertEqual(validate(root), 0)
 
+    def test_estimated_word_span_cannot_pass_as_karaoke(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0]["word_spans"] = [
+                {"word": "A", "start": 0.0, "end": 0.2, "timing_source": "observed"},
+                {"word": "sentence.", "start": 0.2, "end": 0.4, "timing_source": "estimated"},
+            ]
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+
+    def test_course_profile_requires_explicit_scope_and_hash_bound_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio").mkdir()
+            (root / "audio" / "lesson.mp3").write_bytes(b"fixture")
+            spoken = root / "spoken.txt"
+            spoken.write_text("Narrated sentence.", encoding="utf-8")
+            digest = hashlib.sha256(spoken.read_bytes()).hexdigest()
+            canonical = [
+                {"id": "s-1", "text": "Narrated sentence."},
+                {"id": "s-2", "text": "EPUB-only reference."},
+            ]
+            analysis = [{**item, "trans": "译文", "vocab": []} for item in canonical]
+            aligned = [
+                {**analysis[0], "word_spans": [{"word": "Narrated", "start": 0, "end": .2}, {"word": "sentence.", "start": .2, "end": .4}], "raw_start": 0, "raw_end": .4, "has_audio_match": True, "fallback_used": False, "alignment_status": "validated", "matched_token_count": 2, "source_token_count": 2, "match_ratio": 1},
+                {**analysis[1], "word_spans": [], "raw_start": None, "raw_end": None, "has_audio_match": False, "fallback_used": False, "alignment_status": "not-applicable", "alignment_reason": "out_of_scope_reference", "matched_token_count": 0, "source_token_count": 3, "match_ratio": 0},
+            ]
+            for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            (root / "audio_content_profile.json").write_text(json.dumps({
+                "schema_version": 1, "audio_content_mode": "course",
+                "spoken_source": {"path": "spoken.txt", "sha256": digest},
+                "units": [{"chapter": 1, "audio_path": "audio/lesson.mp3", "audio_start": 0, "audio_end": 10, "sentence_ids": ["s-1"]}],
+            }), encoding="utf-8")
+            self.assertEqual(validate(root), 0)
+            aligned[1]["alignment_reason"] = "non_narrated_text"
+            (root / "book_ch01_aligned_sentences.json").write_text(json.dumps(aligned), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+            aligned[1]["alignment_reason"] = "out_of_scope_reference"
+            aligned[0]["raw_end"] = 11
+            (root / "book_ch01_aligned_sentences.json").write_text(json.dumps(aligned), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+
+    def test_audio_omission_is_not_a_non_narrated_exception(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_fixture(root)
+            aligned = root / "book_ch01_aligned_sentences.json"
+            data = json.loads(aligned.read_text(encoding="utf-8"))
+            data[0].update({"has_audio_match": False, "word_spans": [], "alignment_status": "review-required", "alignment_reason": "audio_omitted"})
+            aligned.write_text(json.dumps(data), encoding="utf-8")
+            self.assertNotEqual(validate(root), 0)
+
     def test_owner_review_ledger_blocks_release_instead_of_waiving_alignment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
