@@ -1,158 +1,124 @@
 # Interactive Audiobook Reader Pipeline
 
-A deterministic, industrial toolchain for transforming EPUB chapters and audiobook audio into an Apple Books-grade standalone interactive reading experience with word-level forced alignment, bilingual vocabulary breakdown, and zero-dependency publication.
+**The Apple Books-grade Interactive Bilingual Reader & Audiobook Engine, built specifically for macOS & Apple Silicon.**
 
-Complete audiobooks are the default product. Abridged and course audio must use a hash-bound `audio_content_profile.json` with an explicit spoken source and sentence-to-audio intervals; inferred omissions cannot pass release.
-
----
-
-## Key Capabilities
-
-- **Evidence-Gated Alignment**: Word-by-word timestamp synchronization powered by MLX Whisper and dynamic monotonic alignment.
-- **Apple Books Typography**: Responsive serif layouts with dark, sepia, and light reading themes.
-- **Intuitive Touch & Keyboard Navigation**: Tap sentence for point-and-play and sentence breakdown; double-tap for a 3x sentence repeat loop; `Space` for card toggle; `R` for repeat loop.
-- **O(log N) Binary Synchronization**: Sub-millisecond frame synchronization with automatic requestAnimationFrame throttling when paused or backgrounded.
-- **Hardware-Accelerated Audio**: Native pitch-preserving variable speed playback (`preservesPitch`) and seamless Cloudflare R2 CDN streaming.
-- **Deterministic Quality Gates**: Release gate enforces 95% acoustic coverage, translation completeness, and SHA-256 cryptographic authorization tokens.
+[![macOS](https://img.shields.io/badge/platform-macOS%2013%2B-black.svg?style=flat-square&logo=apple)](https://apple.com)
+[![Apple Silicon](https://img.shields.io/badge/hardware-Apple%20Silicon%20(M1/M2/M3/M4)-orange.svg?style=flat-square)](https://apple.com)
+[![Acoustics](https://img.shields.io/badge/acoustics-Apple%20MLX%20Whisper-blue.svg?style=flat-square)](https://github.com/ml-explore/mlx)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
 ---
 
-## Toolchain Architecture
-
-| Module | Responsibility |
-| :--- | :--- |
-| [`intake_reconciler.py`](intake_reconciler.py) | **Intake & Reconciler**: Parses EPUB structure, matches acoustic anchors, and enforces hash-bound approval. |
-| [`industrial_orchestrator.py`](industrial_orchestrator.py) | **Industrial Orchestrator**: Manages micro-batch processing, GPU memory limits, and atomic resumption state. |
-| [`extract_epub.py`](extract_epub.py) | **EPUB Extractor**: Extracts unabridged text and normalizes sentence boundaries without dropping punctuation. |
-| [`pipeline.py`](pipeline.py) | **Alignment Engine**: Runs MLX Whisper acoustic forced alignment and generates synchronized time indices. |
-| [`quality_gate.py`](quality_gate.py) | **Quality Gate**: Validates monotonic timestamps, acoustic coverage thresholds, and translation integrity. |
-| [`html_builder.py`](html_builder.py) | **Reader 2.0 Compiler**: Emits standalone, zero-dependency interactive HTML readers. |
-| [`universal_runner.py`](universal_runner.py) | **Universal Runner (`reader-build`)**: End-to-end dual-mode CLI for building pure-text interactive readers or audiobooks from EPUB. |
-| [`publisher.py`](publisher.py) | **Auto-Publisher**: Orchestrates Cloudflare R2 upload with SHA-256 caching, shelf manifest updates, and verification. |
-| [`local_publisher.py`](local_publisher.py) | **Offline Publisher**: Packages standalone offline readers without cloud infrastructure dependencies. |
+A deterministic, industrial-strength pipeline for converting any EPUB book into a standalone, zero-dependency bilingual reading experience with Apple Books typography, word-level acoustic synchronization, bilingual contextual breakdown, and cryptographic release verification.
 
 ---
 
-## Installation
+## Why macOS & Apple Silicon?
 
-### Standard Setup
+- **Zero-Dependency Core**: Pure text interactive readers require **zero external dependencies** — running entirely on the native Python 3.9+ standard library.
+- **Apple Silicon Unified Memory Acceleration**: Speech-to-text forced alignment uses Apple's official `mlx-whisper`, executing on the Mac's Neural Engine and GPU without bloated CUDA drivers or cloud API fees.
+- **Apple Books-Grade Aesthetics**: Features responsive New York/San Francisco serif typography, instant word-by-word highlight, 44px Apple HIG touch targets, and fluid Sepia/Light/Dark themes.
+- **Native macOS Workflow**: Automatic Safari browser launch (`open`) upon compilation completion, with instant delivery copy via `pbcopy`.
+
+---
+
+## Quickstart (30 Seconds on Mac)
+
+Clone the repository and build the included public-domain demo (*Sun Tzu's The Art of War*) in 5 seconds:
 
 ```bash
-python3 -m pip install -e .
+# 1. Clone the repository
+git clone https://github.com/ZACK1997999/interactive-audiobook-reader-pipeline.git
+cd interactive-audiobook-reader-pipeline
+
+# 2. Build the interactive bilingual reader (Zero external dependencies needed)
+python3 universal_runner.py demo/sample.epub --text-only
 ```
 
-### Apple Silicon Hardware-Accelerated Acoustic Engine
+Your default browser (Safari) will automatically open displaying the completed standalone interactive reader.
+
+---
+
+## Dual-Mode Operation
+
+### 1. Pure Text Interactive Reader (`text_only`)
+Ideal for books without audiobooks. Generates complete chapter-by-chapter bilingual readers with sentence click-to-translate, interactive vocabulary popups, and keyboard navigation.
 
 ```bash
-python3 -m pip install -e '.[acoustic]'
+# Basic run with auto-detected output directory:
+python3 universal_runner.py /path/to/book.epub --text-only
+
+# High-throughput parallel translation (e.g. 8 workers):
+python3 universal_runner.py /path/to/book.epub --text-only --concurrency 8 --book-dir ./my_book
 ```
 
-### Deployment & Cloudflare R2 Publisher Support
+### 2. Immersive Studio Audiobook (`complete`)
+Combines EPUB text with professional narrator audio tracks (`.mp3`), performing word-by-word forced alignment via Apple Silicon MLX Whisper.
 
 ```bash
-python3 -m pip install -e '.[deployment]'
+# Install Apple Silicon MLX acoustic support:
+pip install -e '.[acoustic]'
+
+# Build complete audiobook reader:
+python3 universal_runner.py --epub /path/to/book.epub --audio-dir /path/to/mp3s --book-dir ./my_book
 ```
 
 ---
 
-## Quickstart
+## CLI Installation
 
-### 0. Universal Dual-Mode Reader Building (`reader-build`)
-
-Compile standalone interactive bilingual readers directly from any EPUB, supporting both **Pure Text Readers** (zero audio required) and **Audiobook Readers** (word-level acoustic synchronization):
+Install into your local Python environment to use the `reader-build` command anywhere on your Mac:
 
 ```bash
-# 1. Pure Text Interactive Reader (no audio needed):
-reader-build /path/to/book.epub --text-only --concurrency 8
+# Standard setup (Text-only readers)
+pip install -e .
 
-# 2. Automatically infer title and build in target book directory:
-reader-build --epub /path/to/book.epub --book-dir /path/to/output_dir --concurrency 8
-
-# 3. Audiobook Reader (with matching audio files):
-reader-build --epub /path/to/book.epub --audio-dir /path/to/audio --book-dir /path/to/output_dir
+# Full setup (Apple Silicon MLX acoustic engine + publication tools)
+pip install -e '.[acoustic,deployment]'
 ```
 
-### 1. Zero-Touch Intake & Verification
-
-Generate acoustic probes and compute the deterministic intake plan:
+Once installed, simply run:
 
 ```bash
-reader-intake --epub /path/to/book.epub --audio-dir /path/to/audio \
-  --probes /path/to/probes.json --output /path/to/intake_plan.json
-reader-intake --approve /path/to/intake_plan.json
-reader-intake --verify /path/to/intake_plan.json
+reader-build /path/to/book.epub --text-only
 ```
 
-### 2. Run Industrial Alignment
+---
 
-Execute unattended chapter processing with automatic checkpoint resumption:
-
-```bash
-python3 industrial_orchestrator.py \
-  --book-dir /path/to/output_dir \
-  --linguistic-command 'python3 agy_linguistic_worker.py' \
-  --acoustic-command 'python3 mlx_acoustic_worker.py'
-```
-
-### 3. Automated Publishing & Shelf Registration
-
-Run the deployment preflight before any expensive processing or publication:
-
-```bash
-python3 deployment_preflight.py --config /path/to/publisher_config.json
-```
-
-The preflight is fail-closed. It checks the actual portal repository, deployment
-entrypoint, branch, required release inputs, and reports when repository visibility
-must be checked in GitHub/Cloudflare. It does not upload, push, or publish anything.
-
-Publish aligned readers through the single release entry point:
-
-```bash
-reader-release /path/to/publisher_config.json --dry-run
-reader-release /path/to/publisher_config.json
-```
-
-See [`publisher_config.example.json`](publisher_config.example.json) for the configuration schema.
-
-The example is not a live configuration. Create a local, ignored
-`publisher_config.json` for each deployment target. Keep credentials in the
-environment or a secret manager. This project deliberately does not infer the
-public portal from the current code repository: in the existing setup, the reader
-pipeline repository and `/Users/lindy/Vault/Audible` portal repository are separate
-systems. A private portal repository can therefore affect Pages/Cloudflare builds
-even when local release validation passes.
-
-For the legacy chunked portal, the safe order is:
+## Project Structure
 
 ```text
-quality gate -> semantic gate -> HTML smoke check -> deployment preflight
--> portal build/chunk -> portal repository status/branch check -> explicit push
--> public URL and audio range verification
+├── universal_runner.py           # Primary CLI entrypoint (reader-build)
+├── extract_epub.py               # Clean EPUB sentence boundary extractor
+├── dynamic_aligner.py            # High-precision word-level acoustic aligner
+├── html_builder.py               # Apple Books-grade standalone HTML compiler
+├── content_profile.py            # Mode router (text_only vs complete audio)
+├── quality_gate.py               # Cryptographic release gate & smoke tester
+├── validate_outputs.py           # Invariant validator for publication
+├── acoustic_whisper.py           # Apple Silicon MLX Whisper extractor
+├── demo/
+│   └── sample.epub               # Minimal 5KB public-domain demo EPUB
+├── examples/
+│   └── book-runners/             # Historical book-specific pipeline runners
+├── docs/
+│   └── history/                  # Archive of milestone specs and benchmarks
+├── requirements.txt              # Standard macOS pip requirements
+├── setup.py                      # Package configuration & console scripts
+└── LICENSE                       # MIT License
 ```
-
-`reader-publish` remains available as a lower-level compatibility command, but it
-must not be called directly for a production release. Never run the legacy
-all-books script as an implicit post-processing step. Select one book, one source
-HTML, one portal branch, and record the resulting commit and public URL in the
-release journal.
 
 ---
 
-## Verification & Testing
+## Quality Verification
 
-The test suite validates data invariants, CSS zero-jitter rules, failure recovery, and acoustic alignment:
+Run the comprehensive unit and integration test matrix:
 
 ```bash
 python3 -m unittest discover
 ```
 
-Continuous integration runs across Python 3.9, 3.11, and 3.13.
-
 ---
 
-## Standards & Specifications
+## License
 
-- [`SPECIFICATION.md`](SPECIFICATION.md): Typography, CSS variable contract, DOM tree schema, and client runtime architecture.
-- [`QUALITY_STANDARD.md`](QUALITY_STANDARD.md): Quality gate rules, acoustic coverage thresholds, and anomaly detection.
-- [`REPRODUCE.md`](REPRODUCE.md): End-to-end environment reproduction guide.
+This project is licensed under the [MIT License](LICENSE).
