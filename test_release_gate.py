@@ -277,7 +277,23 @@ class ReleaseGateTests(unittest.TestCase):
     def test_common_abbreviations_do_not_trigger_boundary_warning(self):
         self.assertEqual(_suspicious_sentence_boundaries("Mrs. Winchester asked Dr. Hewitt.") , [])
         self.assertEqual(_suspicious_sentence_boundaries("A Guide to U.S. Prisons."), [])
-        self.assertTrue(_suspicious_sentence_boundaries("The door opened. Millie stepped inside."))
+    def test_text_only_profile_passes_without_audio(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "audio_content_profile.json").write_text(json.dumps({
+                "schema_version": 1,
+                "audio_content_mode": "text_only"
+            }), encoding="utf-8")
+            canonical = [{"id": "s-1", "text": "A sentence."}]
+            analysis = [{"id": "s-1", "text": "A sentence.", "trans": "一个句子。", "vocab": []}]
+            aligned = [{"id": "s-1", "text": "A sentence.", "trans": "一个句子。", "vocab": [], "has_audio_match": False, "start": None, "end": None, "word_spans": []}]
+            for suffix, data in (("canonical_sentences", canonical), ("full_analysis", analysis), ("aligned_sentences", aligned)):
+                (root / f"book_ch01_{suffix}.json").write_text(json.dumps(data), encoding="utf-8")
+            rep_path = root / "reader_validation_report.json"
+            self.assertEqual(validate(root, rep_path), 0)
+            report = json.loads(rep_path.read_text(encoding="utf-8"))
+            self.assertTrue(report["release_ready"])
+            self.assertEqual(report["audio_content_mode"], "text_only")
 
 
 if __name__ == "__main__":

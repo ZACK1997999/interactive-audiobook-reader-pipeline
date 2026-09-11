@@ -78,9 +78,14 @@ def build_master_reader(book_title, book_subtitle, book_author, chapters_config,
             'sentences': sents
         })
         
-    first_ch_audio = loaded_chapters[0]['audio'] if loaded_chapters else "./audio/chapter_00.mp3"
+    has_audio = any(bool(c.get('audio') or c.get('public_audio')) for c in loaded_chapters)
+    first_ch_audio = loaded_chapters[0]['audio'] if (loaded_chapters and loaded_chapters[0].get('audio')) else ""
     first_ch_public_audio = loaded_chapters[0].get('public_audio') if loaded_chapters else None
     first_ch_num = loaded_chapters[0]['num'] if loaded_chapters else 0
+    audio_src = first_ch_public_audio or first_ch_audio or "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
+    play_btn_attr = "" if has_audio else ' style="display: none;"'
+    audio_track_attr = "" if has_audio else ' style="display: none;"'
+    repeat_group_attr = "" if has_audio else ' style="display: none;"'
     
     html_head = f"""<!DOCTYPE html>
 <html lang="en" data-theme="sepia">
@@ -724,14 +729,14 @@ body {{
     </div>
     
     <div class="nav-actions">
-      <button class="icon-btn primary" id="globalPlayBtn" onclick="toggleGlobalPlay()">▶ Play</button>
+      <button class="icon-btn primary" id="globalPlayBtn" onclick="toggleGlobalPlay()"{play_btn_attr}>▶ Play</button>
       <button class="icon-btn" id="drawerToggleBtn" onclick="toggleDrawer()">⚙️ Menu</button>
     </div>
   </div>
   
   <div class="control-drawer" id="controlDrawer">
     <div class="drawer-inner">
-      <audio id="audioTrack" controls preload="metadata" src="{html.escape(first_ch_public_audio or first_ch_audio)}"></audio>
+      <audio id="audioTrack" controls preload="metadata" src="{html.escape(audio_src)}"{audio_track_attr}></audio>
       <div class="drawer-row">
         <div class="drawer-group">
           <button class="icon-btn" onclick="adjustFontSize(-1)">A-</button>
@@ -739,7 +744,7 @@ body {{
           <button class="icon-btn" onclick="toggleTheme()">Theme</button>
           <button class="icon-btn" id="tipsToggleBtn" onclick="toggleTips()">Tips</button>
         </div>
-        <div class="drawer-group">
+        <div class="drawer-group"{repeat_group_attr}>
           <label style="font-family: var(--font-sans); font-size: 0.82rem; color: var(--text-sub);">
             Repeat
             <select id="shadowRepeatSelect" onchange="setShadowRepetitions(this.value)">
@@ -761,14 +766,14 @@ body {{
         <div class="tips-columns">
           <div class="tips-section">
             <div class="tips-section-title">Touch & Mouse</div>
-            <div class="tips-row"><span class="tips-key">Tap Sentence</span><span>Play audio & show breakdown</span></div>
-            <div class="tips-row"><span class="tips-key">Double Tap</span><span>Repeat sentence loop</span></div>
-            <div class="tips-row"><span class="tips-key">Tap Card</span><span>Collapse card</span></div>
+            <div class="tips-row"><span class="tips-key">Tap Sentence</span><span>{'Play audio & show breakdown' if has_audio else 'Show translation & vocabulary breakdown'}</span></div>
+            <div class="tips-row"><span class="tips-key">{'Double Tap' if has_audio else 'Tap Active / Card'}</span><span>{'Repeat sentence loop' if has_audio else 'Collapse translation card'}</span></div>
+            {f'<div class="tips-row"><span class="tips-key">Tap Card</span><span>Collapse card</span></div>' if has_audio else ''}
           </div>
           <div class="tips-section">
             <div class="tips-section-title">Keyboard Shortcuts</div>
             <div class="tips-row"><span class="tips-key">Space</span><span>Toggle breakdown card</span></div>
-            <div class="tips-row"><span class="tips-key">R</span><span>Repeat current sentence</span></div>
+            {f'<div class="tips-row"><span class="tips-key">R</span><span>Repeat current sentence</span></div>' if has_audio else ''}
             <div class="tips-row"><span class="tips-key">← / →</span><span>Previous / Next sentence</span></div>
           </div>
         </div>
@@ -878,6 +883,7 @@ body {{
 window.__BOOK_ID__ = {book_id_json};
 window.__INITIAL_CHAPTER__ = {first_ch_num};
 window.__INITIAL_PUBLIC_AUDIO__ = {json.dumps(first_ch_public_audio)};
+window.__HAS_AUDIO__ = {json.dumps(has_audio)};
 const STORAGE_PREFIX = 'reader_' + (window.__BOOK_ID__ || 'default') + '_';
 """ + """
 let pendingSelection = null;
@@ -1281,13 +1287,18 @@ function handleSentenceClick(event, id, start, end, hasMatch) {{
   lastSentenceClickTime = now;
   lastSentenceClickId = id;
   
-  if (isDoubleTap) {{
+  if (isDoubleTap && window.__HAS_AUDIO__) {{
     startSentenceShadowing(el);
+    return;
+  }}
+
+  if (el.classList.contains('active') && !isDoubleTap) {{
+    el.classList.remove('active');
     return;
   }}
   
   localStorage.setItem(STORAGE_PREFIX + 'last_sentence_c' + activeChapterNum, id);
-  if (hasMatch && Number.isFinite(start) && Number.isFinite(end) && end > start) {{
+  if (window.__HAS_AUDIO__ && hasMatch && Number.isFinite(start) && Number.isFinite(end) && end > start) {{
     audio.currentTime = start;
     audio.play();
     globalPlayBtn.textContent = '⏸ Pause';
@@ -1476,31 +1487,41 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   
-  let currentIndex = units.findIndex(u => {
-    const s = parseFloat(u.dataset.start);
-    const e = parseFloat(u.dataset.end);
-    return curTime >= s && curTime <= e;
-  });
-  
-  if (currentIndex === -1) {
-    for (let i = units.length - 1; i >= 0; i--) {
-      if (parseFloat(units[i].dataset.start) <= curTime) {
-        currentIndex = i;
-        break;
+  let activeUnit = activeSection.querySelector('.sentence-unit.active');
+  let currentIndex = activeUnit ? units.indexOf(activeUnit) : -1;
+  if (currentIndex === -1 && window.__HAS_AUDIO__ && audio && !isNaN(audio.currentTime) && audio.currentTime > 0) {
+    const curTime = audio.currentTime;
+    currentIndex = units.findIndex(u => {
+      const s = parseFloat(u.dataset.start);
+      const e = parseFloat(u.dataset.end);
+      return curTime >= s && curTime <= e;
+    });
+    if (currentIndex === -1) {
+      for (let i = units.length - 1; i >= 0; i--) {
+        if (parseFloat(units[i].dataset.start) <= curTime) {
+          currentIndex = i;
+          break;
+        }
       }
     }
-    if (currentIndex === -1) currentIndex = 0;
   }
+  if (currentIndex === -1) currentIndex = 0;
   
   if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
     e.preventDefault();
     const targetIdx = Math.max(0, currentIndex - 1);
     const targetUnit = units[targetIdx];
     if (targetUnit) {
-      const st = parseFloat(targetUnit.dataset.start);
-      audio.currentTime = st;
-      audio.play();
-      globalPlayBtn.textContent = '⏸ Pause';
+      if (activeUnit) activeUnit.classList.remove('active');
+      targetUnit.classList.add('active');
+      if (window.__HAS_AUDIO__ && targetUnit.dataset.matched === '1') {
+        const st = parseFloat(targetUnit.dataset.start);
+        if (!isNaN(st)) {
+          audio.currentTime = st;
+          audio.play();
+          globalPlayBtn.textContent = '⏸ Pause';
+        }
+      }
       targetUnit.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
@@ -1508,10 +1529,16 @@ window.addEventListener('keydown', (e) => {
     const targetIdx = Math.min(units.length - 1, currentIndex + 1);
     const targetUnit = units[targetIdx];
     if (targetUnit) {
-      const st = parseFloat(targetUnit.dataset.start);
-      audio.currentTime = st;
-      audio.play();
-      globalPlayBtn.textContent = '⏸ Pause';
+      if (activeUnit) activeUnit.classList.remove('active');
+      targetUnit.classList.add('active');
+      if (window.__HAS_AUDIO__ && targetUnit.dataset.matched === '1') {
+        const st = parseFloat(targetUnit.dataset.start);
+        if (!isNaN(st)) {
+          audio.currentTime = st;
+          audio.play();
+          globalPlayBtn.textContent = '⏸ Pause';
+        }
+      }
       targetUnit.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   } else if (e.code === 'Space') {

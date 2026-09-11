@@ -11,7 +11,7 @@ from audio_resolver import resolve_chapter_audio
 from acoustic_whisper import ACOUSTIC_PROFILE_VERSION
 from artifact_io import atomic_write_json
 from release_token import issue_release_token
-from content_profile import COMPLETE, load_content_profile
+from content_profile import COMPLETE, TEXT_ONLY, load_content_profile
 
 MULTI_BOUNDARY = re.compile(r"(?:[.!?][\"'”’)]*|\*)\s+[A-Z]")
 ABBREVIATION_BEFORE_CAPITAL = re.compile(
@@ -242,7 +242,7 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
         chapter_units = content_profile["units_by_chapter"].get(number, [])
         scoped_ids = {sentence_id for unit in chapter_units for sentence_id in unit["sentence_ids"]}
         audio_resolution = resolve_chapter_audio(book_dir / "audio", number) if number is not None else None
-        if number is not None and content_mode != COMPLETE and not chapter_units:
+        if number is not None and content_mode not in (COMPLETE, TEXT_ONLY) and not chapter_units:
             errors.append(f"{label}: non-complete profile has no declared audio units")
         if number is not None and content_mode == COMPLETE:
             if audio_resolution.status == "missing":
@@ -304,6 +304,15 @@ def validate(book_dir: Path, report_path=None, *, require_provenance=False):
             errors.append(f"{label}: canonical/aligned count mismatch")
         if [item.get("id") for item in aligned_data] != ids:
             errors.append(f"{label}: aligned IDs/order differ from canonical source")
+
+        if content_mode == TEXT_ONLY:
+            record["review_required_records"] = 0
+            record["acoustic_coverage"] = 1.0
+            record["covered_audio_tokens"] = 0
+            record["expected_audio_tokens"] = 0
+            record["status"] = "validated"
+            chapters.append(record)
+            continue
 
         previous_start = -1.0
         review_ids = []
