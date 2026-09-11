@@ -4,3 +4,5 @@ outputs/
 test-results/
 playwright-report/
 publisher_config.json
+*.egg-info/
+__pycache__/

@@ -34,6 +34,7 @@ setup(
         "publisher",
         "deployment_preflight",
         "release_cli",
+        "universal_runner",
     ],
     python_requires=">=3.9",
     install_requires=[],
@@ -50,6 +51,7 @@ setup(
             "reader-intake=intake_reconciler:main",
             "reader-publish=publisher:main",
             "reader-release=release_cli:main",
+            "reader-build=universal_runner:main",
         ]
     },
 )

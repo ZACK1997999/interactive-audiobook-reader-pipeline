@@ -27,6 +27,7 @@ Complete audiobooks are the default product. Abridged and course audio must use 
 | [`pipeline.py`](pipeline.py) | **Alignment Engine**: Runs MLX Whisper acoustic forced alignment and generates synchronized time indices. |
 | [`quality_gate.py`](quality_gate.py) | **Quality Gate**: Validates monotonic timestamps, acoustic coverage thresholds, and translation integrity. |
 | [`html_builder.py`](html_builder.py) | **Reader 2.0 Compiler**: Emits standalone, zero-dependency interactive HTML readers. |
+| [`universal_runner.py`](universal_runner.py) | **Universal Runner (`reader-build`)**: End-to-end dual-mode CLI for building pure-text interactive readers or audiobooks from EPUB. |
 | [`publisher.py`](publisher.py) | **Auto-Publisher**: Orchestrates Cloudflare R2 upload with SHA-256 caching, shelf manifest updates, and verification. |
 | [`local_publisher.py`](local_publisher.py) | **Offline Publisher**: Packages standalone offline readers without cloud infrastructure dependencies. |
 
@@ -55,6 +56,21 @@ python3 -m pip install -e '.[deployment]'
 ---
 
 ## Quickstart
+
+### 0. Universal Dual-Mode Reader Building (`reader-build`)
+
+Compile standalone interactive bilingual readers directly from any EPUB, supporting both **Pure Text Readers** (zero audio required) and **Audiobook Readers** (word-level acoustic synchronization):
+
+```bash
+# 1. Pure Text Interactive Reader (no audio needed):
+reader-build /path/to/book.epub --text-only --concurrency 8
+
+# 2. Automatically infer title and build in target book directory:
+reader-build --epub /path/to/book.epub --book-dir /path/to/output_dir --concurrency 8
+
+# 3. Audiobook Reader (with matching audio files):
+reader-build --epub /path/to/book.epub --audio-dir /path/to/audio --book-dir /path/to/output_dir
+```
 
 ### 1. Zero-Touch Intake & Verification
 

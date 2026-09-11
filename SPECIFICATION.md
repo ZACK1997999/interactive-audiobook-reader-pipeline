@@ -23,13 +23,15 @@ The **Interactive Audiobook Reader Pipeline** is a fully automated, Apple Books-
 ---
 
 ## 3. Directory File Standards
-Each book directory strictly maintains the following standard schema:
+Each book directory maintains the following standard schema:
 ```
 [Book Directory]/
+├── audio_content_profile.json                         # Mode: "complete" | "text_only"
+├── chapter_metadata.json                              # Schema v1 track catalog
 ├── [book_prefix]_ch{00..N}_canonical_sentences.json   # 100% EPUB ground truth
-├── [book_prefix]_ch{00..N}_full_analysis.json          # Machiavellian translation + C1/C2 vocab
-├── [book_prefix]_ch{00..N}_aligned_sentences.json      # Word timestamps + audio metadata
-├── audio/
+├── [book_prefix]_ch{00..N}_full_analysis.json          # Translation + C1/C2 vocab
+├── [book_prefix]_ch{00..N}_aligned_sentences.json      # Word timestamps (or text-only cards)
+├── audio/                                             # (Omitted in text_only mode)
 │   ├── chapter_{00..N}.mp3                            # Chapter audio track
 │   └── [book_prefix]_ch{00..N}_acoustic_words.json   # MLX Whisper word timestamps
 └── [Book_Title]_Interactive_Reader.html               # Standalone multi-chapter reader
@@ -37,7 +39,11 @@ Each book directory strictly maintains the following standard schema:
 
 ## 4. Release and Reproducibility Contract
 
-The reader is compiled only after a separate release gate passes. Every aligned record must include matched-token count, source-token count, match ratio, alignment method, fallback status, alignment status, and reason. Global matching may handle narrated sidebars, but an out-of-order, weak, missing, or estimated match is `review-required`, never silently validated. A human or trusted review step may change a genuinely evidenced out-of-order record to `reviewed` only with non-empty `review_evidence`; only that explicit, evidenced status can waive the physical-audio-order check. Each chapter must achieve at least 95% acoustic token coverage across eligible narrated content; headings, non-narrated content, and explicit owner-accepted exceptions are excluded from that denominator. Generated artifacts and manifests are written atomically, and a manifest hash mismatch blocks release.
+The reader is compiled only after a separate release gate passes:
+- **Complete Mode (`audio_content_mode: "complete"`)**: Each chapter must achieve $\ge 95\%$ acoustic token coverage across eligible narrated content. Audio tracks and acoustic word stamps are strictly required; missing or estimated timestamps block release.
+- **Text-Only Mode (`audio_content_mode: "text_only"`)**: Audio file discovery, acoustic coverage, and monotonic audio timestamps are exempted, but 100% bilingual translation completeness and vocabulary schema validity are strictly enforced. Playback audio controls in the compiled HTML reader are hidden while keeping full typography, card expansion, and keyboard navigation.
+
+Every aligned record must include matched-token count, source-token count, match ratio, alignment method, fallback status, alignment status, and reason. Generated artifacts and manifests are written atomically, and a manifest hash mismatch blocks release.
 
 Gemini owns linguistic analysis and must emit the branch-local JSON contract in `LINGUISTIC_ANALYSIS_PROMPT.md`. Local scripts own extraction, acoustic transcription, alignment, validation, and compilation. Deployment is explicit and validation-gated.
 
