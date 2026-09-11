@@ -388,11 +388,6 @@ body {{
   display: block;
 }}
 
-.bookmark-list {{
-  max-height: 260px;
-  overflow-y: auto;
-}}
-
 .tips-columns {{
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -446,21 +441,6 @@ body {{
     gap: 12px;
   }}
 }}
-
-.selection-bookmark {{
-  display: none;
-  position: fixed;
-  z-index: 200;
-  padding: 7px 11px;
-  border: 1px solid var(--accent);
-  border-radius: 7px;
-  background: var(--bg-panel);
-  color: var(--accent);
-  font: 600 0.78rem var(--font-sans);
-  box-shadow: 0 5px 18px rgba(0,0,0,.18);
-  cursor: pointer;
-}}
-.selection-bookmark.open {{ display: block; }}
 
 .tips-section {{
   display: flex;
@@ -760,8 +740,6 @@ body {{
         </div>
       </div>
       <input type="text" id="searchInput" class="search-input" placeholder="Search in active chapter..." oninput="handleSearch()">
-      <button class="icon-btn" id="bookmarksToggleBtn" onclick="toggleBookmarks()">My bookmarks</button>
-      <div class="drawer-tips bookmark-list" id="bookmarkList"></div>
       <div class="drawer-tips" id="drawerTips">
         <div class="tips-columns">
           <div class="tips-section">
@@ -876,7 +854,6 @@ body {{
 
     book_id_json = json.dumps(book_id)
     html_tail = f"""
-<button class="selection-bookmark" id="selectionBookmark" type="button" onpointerdown="bookmarkSelection()" onclick="bookmarkSelection()">★ Bookmark</button>
 </main>
 
 <script>
@@ -886,83 +863,6 @@ window.__INITIAL_PUBLIC_AUDIO__ = {json.dumps(first_ch_public_audio)};
 window.__HAS_AUDIO__ = {json.dumps(has_audio)};
 const STORAGE_PREFIX = 'reader_' + (window.__BOOK_ID__ || 'default') + '_';
 """ + """
-let pendingSelection = null;
-
-function bookmarkSelection() {
-  const btn = document.getElementById('selectionBookmark');
-  const targetId = pendingSelection ? pendingSelection.id : (btn ? btn.dataset.sentenceId : null);
-  const targetText = pendingSelection ? pendingSelection.text : (btn ? btn.dataset.text : null);
-  const targetCh = pendingSelection ? pendingSelection.chapter : (btn && btn.dataset.chapter ? parseInt(btn.dataset.chapter, 10) : activeChapterNum);
-
-  if (!targetId || !targetText) return;
-  const key = STORAGE_PREFIX + 'bookmarks';
-  const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
-  const duplicate = bookmarks.some(bookmark => typeof bookmark !== 'string' && bookmark.id === targetId && bookmark.text === targetText);
-  if (!duplicate) {
-    bookmarks.push({
-      id: targetId,
-      text: targetText,
-      chapter: typeof targetCh === 'number' ? targetCh : activeChapterNum,
-      savedAt: new Date().toISOString()
-    });
-  }
-  localStorage.setItem(key, JSON.stringify(bookmarks));
-  if (btn) btn.classList.remove('open');
-  pendingSelection = null;
-  try { window.getSelection().removeAllRanges(); } catch(e) {}
-  if (typeof refreshBookmarkButton === 'function') refreshBookmarkButton();
-  if (document.getElementById('bookmarkList')?.classList.contains('open')) {
-    if (typeof updateBookmarksUI === 'function') updateBookmarksUI();
-  }
-}
-
-function captureSelection() {
-  const selection = window.getSelection();
-  const text = selection ? selection.toString().trim() : '';
-  const button = document.getElementById('selectionBookmark');
-  if (!text || !selection.rangeCount) return;
-  const anchor = selection.anchorNode && (selection.anchorNode.parentElement || selection.anchorNode);
-  const sentence = anchor && anchor.closest ? anchor.closest('.sentence-unit') : null;
-  if (!sentence) return;
-  const rect = selection.getRangeAt(0).getBoundingClientRect();
-  pendingSelection = { id: sentence.id, text, chapter: activeChapterNum, savedAt: new Date().toISOString() };
-  if (button) {
-    button.dataset.sentenceId = sentence.id;
-    button.dataset.text = text;
-    button.dataset.chapter = String(activeChapterNum);
-    button.style.left = `${Math.min(window.innerWidth - 120, Math.max(8, rect.left))}px`;
-    button.style.top = `${Math.max(8, rect.bottom + 8)}px`;
-    button.classList.add('open');
-  }
-}
-
-document.addEventListener('mouseup', () => setTimeout(captureSelection, 10));
-document.addEventListener('touchend', () => setTimeout(captureSelection, 10));
-document.addEventListener('selectionchange', () => {
-  const selection = window.getSelection();
-  if (!selection || !selection.toString().trim()) {
-    setTimeout(() => {
-      const cur = window.getSelection();
-      if (!cur || !cur.toString().trim()) {
-        const btn = document.getElementById('selectionBookmark');
-        if (btn && !btn.matches(':hover') && !btn.matches(':active')) {
-          btn.classList.remove('open');
-        }
-      }
-    }, 300);
-  }
-});
-document.addEventListener('pointerdown', (e) => {
-  const button = document.getElementById('selectionBookmark');
-  if (button && button.classList.contains('open')) {
-    if (e.target === button || button.contains(e.target) || (e.target.closest && e.target.closest('#selectionBookmark'))) {
-      return;
-    }
-    button.classList.remove('open');
-    pendingSelection = null;
-  }
-});
-
 const audio = document.getElementById('audioTrack');
 const globalPlayBtn = document.getElementById('globalPlayBtn');
 const controlDrawer = document.getElementById('controlDrawer');
@@ -1078,7 +978,6 @@ function switchChapter(chNum) {
   });
   rebuildSentenceTimeIndex();
   reportLibraryProgress(chNum, 0);
-  refreshBookmarkButton();
   
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -1199,83 +1098,6 @@ function startSentenceShadowing(sentenceEl) {
   globalPlayBtn.textContent = '⏸ Pause';
   sentenceEl.classList.add('active');
 }
-
-function updateBookmarksUI() {{
-  const list = document.getElementById('bookmarkList');
-  if (!list) return;
-  const allBookmarks = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
-  const bookmarks = allBookmarks.filter(bookmark => typeof bookmark === 'string' || bookmark.chapter === activeChapterNum);
-  if (!bookmarks.length) {{
-    list.innerHTML = '<div class="tips-row">No bookmarks in this chapter yet.</div>';
-    return;
-  }}
-  list.innerHTML = '';
-  bookmarks.forEach(bookmark => {{
-    const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
-    const sentence = document.getElementById(id);
-    if (!sentence) return;
-    const chapter = typeof bookmark === 'string' ? activeChapterNum : bookmark.chapter;
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:5px 0;';
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'tips-row';
-    item.style.cssText = 'flex:1;border:0;background:transparent;text-align:left;cursor:pointer;padding:0;';
-    item.textContent = typeof bookmark === 'string' ? (sentence.dataset.text || id) : bookmark.text;
-    item.onclick = () => jumpToBookmark(id, chapter);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.textContent = '×';
-    remove.title = 'Remove bookmark';
-    remove.style.cssText = 'border:0;background:transparent;color:var(--text-sub);cursor:pointer;font-size:1rem;';
-    remove.onclick = (event) => {{ event.stopPropagation(); removeBookmark(bookmark); }};
-    row.append(item, remove);
-    list.appendChild(row);
-  }});
-}}
-
-function removeBookmark(target) {{
-  const key = STORAGE_PREFIX + 'bookmarks';
-  const bookmarks = JSON.parse(localStorage.getItem(key) || '[]');
-  const targetId = typeof target === 'string' ? target : target.id;
-  const targetText = typeof target === 'string' ? null : target.text;
-  const targetChapter = typeof target === 'string' ? null : target.chapter;
-  const remaining = bookmarks.filter(bookmark => {{
-    const id = typeof bookmark === 'string' ? bookmark : bookmark.id;
-    const text = typeof bookmark === 'string' ? null : bookmark.text;
-    const chapter = typeof bookmark === 'string' ? null : bookmark.chapter;
-    return !(id === targetId && (targetText === null || text === targetText) &&
-      (targetChapter === null || chapter === targetChapter));
-  }});
-  localStorage.setItem(key, JSON.stringify(remaining));
-  updateBookmarksUI();
-  refreshBookmarkButton();
-}}
-
-function refreshBookmarkButton() {{
-  const all = JSON.parse(localStorage.getItem(STORAGE_PREFIX + 'bookmarks') || '[]');
-  const count = all.filter(bookmark => typeof bookmark === 'string' || bookmark.chapter === activeChapterNum).length;
-  const button = document.getElementById('bookmarksToggleBtn');
-  if (button) button.textContent = count ? `My bookmarks (${count})` : 'My bookmarks';
-}}
-
-function toggleBookmarks() {{
-  const list = document.getElementById('bookmarkList');
-  if (!list) return;
-  const open = list.classList.toggle('open');
-  if (open) updateBookmarksUI();
-}}
-
-function jumpToBookmark(id, targetChapter) {{
-  const chapter = typeof targetChapter === 'number' ? targetChapter : activeChapterNum;
-  if (chapter !== activeChapterNum) switchChapter(chapter);
-  setTimeout(() => {{
-    const sentence = document.getElementById(id);
-    if (!sentence) return;
-    sentence.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-    sentence.click();
-  }}, 100);
-}}
 
 function handleSentenceClick(event, id, start, end, hasMatch) {{
   if (event) event.stopPropagation();
