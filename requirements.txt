@@ -1,0 +1,10 @@
+# Interactive Audiobook Reader Pipeline
+# Designed specifically for macOS & Apple Silicon (M1/M2/M3/M4)
+#
+# 1. Pure Text Interactive Readers: Zero external dependencies (uses Python 3.9+ standard library).
+# 2. Apple Silicon Hardware-Accelerated Acoustic Engine:
+mlx-whisper>=0.4.0; sys_platform == 'darwin'
+
+# Optional utilities:
+boto3>=1.34.0
+Pillow>=10.0.0

@@ -1,8 +1,11 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "examples" / "book-runners"))
 
 from acoustic_whisper import (
     ACOUSTIC_PROFILE_VERSION,

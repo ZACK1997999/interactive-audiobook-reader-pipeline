@@ -3,4 +3,11 @@ node_modules/
 outputs/
 test-results/
 playwright-report/
+reports/
 publisher_config.json
+*.egg-info/
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/

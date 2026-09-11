@@ -42,16 +42,14 @@ class HTMLBuilderTests(unittest.TestCase):
                 }], str(output), release_token=token, release_report_path=report_path,
             )
             rendered = output.read_text(encoding="utf-8")
-            self.assertIn('id="bookmarksToggleBtn"', rendered)
-            self.assertNotIn('inspect-actions', rendered)
-            self.assertIn('id="bookmarkList"', rendered)
+            self.assertNotIn('bookmarksToggleBtn', rendered)
+            self.assertNotIn('selectionBookmark', rendered)
+            self.assertNotIn('bookmarkList', rendered)
             for function_name in (
-                "bookmarkSelection", "updateBookmarksUI",
-                "refreshBookmarkButton", "jumpToBookmark", "toggleBookmarks",
+                "switchChapter", "handleSentenceClick",
+                "toggleGlobalPlay", "syncPlayback",
             ):
                 self.assertRegex(rendered, rf"function {function_name}\s*\(")
-            self.assertIn("chapter === targetChapter", rendered)
-            self.assertIn("text === targetText", rendered)
             self.assertIn("window.addEventListener('storage'", rendered)
             self.assertIn("--bg-page: #12151c", rendered)
 
